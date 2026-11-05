@@ -1,0 +1,10 @@
+{
+  "shallow_depth": "더 깊이 내려가세요",
+  "trunk_lean": "상체를 더 세우세요",
+  "body_line": "몸을 일직선으로 유지하세요",
+  "phase.waiting": "준비 자세를 잡아주세요",
+  "phase.up": "시작",
+  "phase.moving": "진행 중",
+  "phase.down": "아래",
+  "no_person": "사람이 보이지 않아요"
+}
