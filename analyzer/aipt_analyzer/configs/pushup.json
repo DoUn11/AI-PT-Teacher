@@ -1,0 +1,23 @@
+{
+  "exercise": "pushup",
+  "version": 1,
+  "calibrated": false,
+  "_note": "초기값(미검증). 측면 촬영 기준. 수평 자세는 키포인트가 흔들릴 수 있어 실측 보정이 특히 필요하다.",
+  "primary_feature": "elbow_angle",
+  "up_threshold": 155,
+  "count_threshold": 120,
+  "smoothing": 0.6,
+  "min_rep_seconds": 0.6,
+  "min_keypoint_conf": 0.3,
+  "depth": {
+    "code": "shallow_depth",
+    "target": 90,
+    "tolerance": 15,
+    "penalty_per_degree": 2.0,
+    "min_score": 30
+  },
+  "form_checks": [
+    {"code": "body_line", "feature": "body_line", "stat": "min", "limit": 155, "penalty": 20}
+  ],
+  "judge": {"type": "threshold"}
+}
