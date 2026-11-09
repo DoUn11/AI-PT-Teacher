@@ -1,0 +1,23 @@
+{
+  "exercise": "squat",
+  "version": 1,
+  "calibrated": false,
+  "_note": "초기값(미검증). 측면 촬영 기준. 실측/학습 데이터로 보정 전까지는 참고용.",
+  "primary_feature": "knee_angle",
+  "up_threshold": 160,
+  "count_threshold": 130,
+  "smoothing": 0.6,
+  "min_rep_seconds": 0.6,
+  "min_keypoint_conf": 0.3,
+  "depth": {
+    "code": "shallow_depth",
+    "target": 100,
+    "tolerance": 10,
+    "penalty_per_degree": 2.5,
+    "min_score": 30
+  },
+  "form_checks": [
+    {"code": "trunk_lean", "feature": "trunk_lean", "stat": "max", "limit": 55, "penalty": 15}
+  ],
+  "judge": {"type": "threshold"}
+}
