@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI PT쌤</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header>
+    <h1>AI PT쌤</h1>
+    <span id="who" class="muted"></span>
+    <button id="logout" class="ghost" type="button" hidden>로그아웃</button>
+  </header>
+
+  <main>
+    <section id="auth" hidden>
+      <h2>로그인</h2>
+      <form id="login-form">
+        <label>서버 주소 <input id="server" type="url" required></label>
+        <label>이메일 <input id="email" type="email" autocomplete="username" required></label>
+        <label>비밀번호 (8자 이상) <input id="password" type="password" autocomplete="current-password" required></label>
+        <label>닉네임 (회원가입 시) <input id="nickname" type="text" maxlength="50"></label>
+        <div class="row">
+          <button type="submit">로그인</button>
+          <button id="register" type="button" class="ghost">회원가입</button>
+        </div>
+        <p id="auth-error" class="error" role="alert"></p>
+      </form>
+    </section>
+
+    <div id="app" hidden>
+      <nav role="tablist">
+        <button id="btn-camera" role="tab" aria-selected="true" type="button">촬영 (웹캠)</button>
+        <button id="btn-dashboard" role="tab" aria-selected="false" type="button">기록 (결과 확인)</button>
+      </nav>
+
+      <section id="tab-camera">
+        <div class="controls">
+          <label>운동
+            <select id="exercise">
+              <option value="squat">스쿼트</option>
+              <option value="pushup">푸시업</option>
+            </select>
+          </label>
+          <label class="inline"><input id="upload" type="checkbox" checked> 결과를 서버에 저장</label>
+          <button id="start" type="button">시작</button>
+          <button id="stop" type="button" class="ghost" disabled>종료</button>
+        </div>
+        <p id="status" class="muted" aria-live="polite"></p>
+        <div class="stage">
+          <video id="video" playsinline muted></video>
+          <canvas id="overlay"></canvas>
+        </div>
+        <p id="upload-status" class="muted" aria-live="polite"></p>
+        <p id="result" class="result" aria-live="polite"></p>
+        <ol id="reps" class="reps" reversed></ol>
+        <p class="hint">옆모습이 보이도록 전신이 화면에 들어오게 서 주세요. 판정 기준은 아직 보정되지 않은 초기값입니다.</p>
+      </section>
+
+      <section id="tab-dashboard" hidden></section>
+    </div>
+  </main>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
