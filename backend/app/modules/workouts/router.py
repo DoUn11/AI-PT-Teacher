@@ -1,9 +1,10 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.firebase import save_workout_session_to_firebase
 from app.db import get_db
 from app.modules.auth.deps import get_current_user
 from app.modules.auth.models import User, utcnow
@@ -114,6 +115,7 @@ def add_reps(
 @router.post("/sessions/{session_id}/finish", response_model=SessionDetail)
 def finish_session(
     session_id: int,
+    background_tasks: BackgroundTasks, 
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -127,7 +129,34 @@ def finish_session(
     session.total_reps = len(scores)
     session.avg_score = round(sum(scores) / len(scores), 1) if scores else None
     db.commit()
+    db.refresh(session)
+    
+    reps_list_data = [
+        {
+            "index": rep.index,
+            "score": rep.score,
+            "min_angle": rep.min_angle,
+            "feedback": rep.feedback,
+            "completed_at": rep.completed_at.isoformat() if rep.completed_at else str(utcnow())
+        }
+        for rep in session.reps
+    ]
+    background_tasks.add_task(
+        save_workout_session_to_firebase,
+        session_id=session.id,
+        user_id=session.user_id,
+        exercise=session.exercise,
+        status=session.status,
+        started_at=session.started_at.isoformat() if session.started_at else str(utcnow()),
+        finished_at=session.finished_at.isoformat() if session.finished_at else None,
+        total_reps=session.total_reps,
+        avg_score=session.avg_score,
+        reps_list=reps_list_data
+    )
+    
     return session
+
+
 
 
 @router.get("/stats", response_model=list[ExerciseStats])

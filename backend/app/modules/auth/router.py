@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
+from app.core.firebase import save_user_to_firestore
 from app.core.security import create_access_token
 from app.db import get_db
 from app.modules.auth import service
@@ -12,9 +13,17 @@ router = APIRouter(tags=["auth"])
 
 
 @router.post("/auth/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(body: RegisterRequest, db: Session = Depends(get_db)):
+def register(body: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     try:
-        return service.create_user(db, body.email, body.password, body.nickname)
+        user = service.create_user(db, body.email, body.password, body.nickname)
+        background_tasks.add_task(
+            save_user_to_firestore,
+            user_id=user.id,
+            email=user.email,
+            nickname=user.nickname,
+            created_at=user.created_at.isoformat() if user.created_at else str(user.created_at)
+        )
+        return user
     except service.EmailAlreadyRegistered:
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered") from None
 
