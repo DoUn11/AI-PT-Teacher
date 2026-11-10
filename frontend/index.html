@@ -3,65 +3,78 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>AI PT쌤</title>
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%23111111'/%3E%3Cpath d='M8 22h7l4-12 5 20 3-8h5' stroke='white' stroke-width='3' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css?v=20261110.14">
 </head>
 <body>
-  <header>
-    <h1>AI PT쌤</h1>
-    <span id="who" class="muted"></span>
-    <button id="logout" class="ghost" type="button" hidden>로그아웃</button>
-  </header>
-
-  <main>
-    <section id="auth" hidden>
-      <h2>로그인</h2>
-      <form id="login-form">
-        <label>서버 주소 <input id="server" type="url" required></label>
-        <label>이메일 <input id="email" type="email" autocomplete="username" required></label>
-        <label>비밀번호 (8자 이상) <input id="password" type="password" autocomplete="current-password" required></label>
-        <label>닉네임 (회원가입 시) <input id="nickname" type="text" maxlength="50"></label>
-        <div class="row">
-          <button type="submit">로그인</button>
-          <button id="register" type="button" class="ghost">회원가입</button>
-        </div>
-        <p id="auth-error" class="error" role="alert"></p>
-      </form>
-    </section>
-
-    <div id="app" hidden>
-      <nav role="tablist">
-        <button id="btn-camera" role="tab" aria-selected="true" type="button">촬영 (웹캠)</button>
-        <button id="btn-dashboard" role="tab" aria-selected="false" type="button">기록 (결과 확인)</button>
+  <button id="theme-toggle" data-theme-toggle class="icon-button ghost" type="button" aria-label="검은 화면으로 전환" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/></svg></button>
+  <header class="header">
+    <a class="brand" href="./" aria-label="AI PT쌤 홈"><span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg></span> AI PT쌤</a>
+      <nav id="main-nav" aria-label="운동 메뉴">
+        <a id="btn-camera" href="?tab=camera">자세 분석</a>
+        <a id="btn-dashboard" href="?tab=dashboard">운동 기록</a>
       </nav>
+    <div class="header-actions"><span id="who" class="muted"></span><button id="logout" class="ghost" type="button" hidden>로그아웃</button>
 
-      <section id="tab-camera">
-        <div class="controls">
-          <label>운동
-            <select id="exercise">
-              <option value="squat">스쿼트</option>
-              <option value="pushup">푸시업</option>
-            </select>
-          </label>
-          <label class="inline"><input id="upload" type="checkbox" checked> 결과를 서버에 저장</label>
-          <button id="start" type="button">시작</button>
-          <button id="stop" type="button" class="ghost" disabled>종료</button>
+    </div>
+  </header>
+  <main>
+    <section id="auth" class="auth-layout">
+      <div class="auth-masthead"><div class="auth-brand"><span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg></span> AI PT쌤</div></div>
+      <div class="auth-form">
+        <h1 id="auth-title">로그인</h1>
+        <form id="login-form" method="post">
+          <label>이메일 <input id="email" type="email" autocomplete="username" placeholder="name@example.com" required></label>
+          <label>비밀번호 <input id="password" type="password" autocomplete="current-password" placeholder="8자 이상" minlength="8" required></label>
+          <label id="nickname-field" hidden>닉네임 <input id="nickname" type="text" autocomplete="nickname" maxlength="50" placeholder="닉네임"></label>
+          <div class="auth-actions">
+            <button id="auth-submit" type="submit" disabled>로그인</button>
+            <button id="register" type="button" disabled class="ghost">회원가입</button>
+          </div>
+          <p id="auth-error" class="error" role="alert"></p>
+        </form>
+      </div>
+    </section>
+    <div id="app" hidden>
+
+      <section id="tab-camera" aria-label="자세 분석">
+        <div class="workout-layout">
+          <div class="camera-panel card">
+
+            <div class="stage"><span id="camera-state" class="badge" role="status" aria-label="정지"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path class="state-paused" d="M6 5h4v14H6zM14 5h4v14h-4z"/><path class="state-running" d="m3 5 9 7-9 7zm10 0 9 7-9 7z"/></svg></span>
+              <div id="camera-placeholder"><svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10 5-3v10l-5-3"/></svg></div>
+              <video id="video" playsinline muted></video><canvas id="overlay"></canvas>
+            </div>
+            <div class="camera-toolbar"><p id="status" class="muted" aria-live="polite">정지</p><div class="action-pair" role="group" aria-label="촬영 제어"><button id="start" type="button" aria-label="촬영 시작"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M7 4.8a1 1 0 0 1 1.5-.86l11 7a1.25 1.25 0 0 1 0 2.12l-11 7A1 1 0 0 1 7 19.2Z"/></svg><span>시작</span></button><button id="stop" type="button" aria-label="촬영 종료" disabled><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg><span>종료</span></button></div></div>
+          </div>
+          <aside class="workout-side">
+            <div class="card controls">
+              <fieldset id="exercise"><legend id="exercise-label">운동</legend>
+                <div class="exercise-picker">
+                  <button id="exercise-select" class="ghost" type="button" aria-labelledby="exercise-label exercise-value" aria-haspopup="listbox" aria-controls="exercise-options" aria-expanded="false"><span id="exercise-value"></span><svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m5 7 5 5 5-5"/></svg></button>
+                  <div id="exercise-options" role="listbox" aria-labelledby="exercise-label" hidden></div>
+                </div>
+              </fieldset>
+              <label class="inline"><input id="upload" type="checkbox" checked> 결과 저장</label>
+
+            </div>
+            <div class="card session-panel"><h2>횟수</h2><p id="result" class="result" aria-live="polite"></p><p id="upload-status" class="muted" aria-live="polite"></p><ol id="reps" class="reps" reversed></ol><p class="empty-reps muted">0회</p></div>
+          </aside>
         </div>
-        <p id="status" class="muted" aria-live="polite"></p>
-        <div class="stage">
-          <video id="video" playsinline muted></video>
-          <canvas id="overlay"></canvas>
-        </div>
-        <p id="upload-status" class="muted" aria-live="polite"></p>
-        <p id="result" class="result" aria-live="polite"></p>
-        <ol id="reps" class="reps" reversed></ol>
-        <p class="hint">옆모습이 보이도록 전신이 화면에 들어오게 서 주세요. 판정 기준은 아직 보정되지 않은 초기값입니다.</p>
       </section>
-
-      <section id="tab-dashboard" hidden></section>
+      <section id="tab-dashboard" hidden aria-label="운동 기록"></section>
     </div>
   </main>
 
-  <script type="module" src="./src/main.js"></script>
+  <script type="module">
+    import("./src/main.js?v=20261110.14").catch((error) => {
+      document.getElementById("auth").hidden = false;
+      document.getElementById("app").hidden = true;
+      document.getElementById("auth-error").textContent = "화면을 불러오지 못했습니다. 새로고침해 주세요.";
+      console.error(error);
+    });
+  </script>
 </body>
 </html>

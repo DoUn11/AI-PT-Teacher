@@ -1,6 +1,5 @@
 // 백엔드(/api/v1) 클라이언트.
 const TOKEN_KEY = "aipt_token"; // 탭을 닫으면 사라지도록 sessionStorage에만 둔다
-const BASE_KEY = "aipt_api_base";
 export const DEFAULT_BASE = "http://127.0.0.1:8000";
 
 export class AuthError extends Error {} // 토큰이 없거나 만료됨 -> 다시 로그인
@@ -24,7 +23,6 @@ const store = (storage) => ({
   },
 });
 const session = store(globalThis.sessionStorage ?? { getItem() {}, setItem() {}, removeItem() {} });
-const local = store(globalThis.localStorage ?? { getItem() {}, setItem() {}, removeItem() {} });
 
 function describe(detail) {
   if (typeof detail === "string") return detail;
@@ -33,13 +31,8 @@ function describe(detail) {
 }
 
 export class Api {
-  constructor() {
-    this.base = local.get(BASE_KEY) || DEFAULT_BASE;
-  }
-
-  setBase(url) {
-    this.base = url.trim().replace(/\/+$/, "") || DEFAULT_BASE;
-    local.set(BASE_KEY, this.base);
+  constructor(base = DEFAULT_BASE) {
+    this.base = base;
   }
 
   get token() { return session.get(TOKEN_KEY); }

@@ -17,3 +17,6 @@ export function h(tag, props = {}, ...children) {
 
 export const EXERCISE_LABELS = { squat: "스쿼트", pushup: "푸시업" };
 export const exerciseLabel = (key) => EXERCISE_LABELS[key] ?? key;
+
+export const PLANNED_EXERCISE_LABELS = { lunge: "런지 (추가 예정)", plank: "플랭크 (추가 예정)", crunch: "크런치 (추가 예정)" };
+export const DISPLAY_EXERCISE_LABELS = { ...EXERCISE_LABELS, ...PLANNED_EXERCISE_LABELS };

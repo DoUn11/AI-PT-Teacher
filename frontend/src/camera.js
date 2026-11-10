@@ -1,7 +1,7 @@
 // 노트북 웹캠(라즈베리파이 대용) -> 브라우저 자세 추정(MediaPipe) -> 분석 -> 영상 위 표시 -> 백엔드 업로드
-import { Analyzer } from "./analysis.js";
-import { drawOverlay, FLASH_MS } from "./overlay.js";
-import { RepUploader } from "./uploader.js";
+import { Analyzer } from "./analysis.js?v=20261110.14";
+import { drawOverlay, FLASH_MS } from "./overlay.js?v=20261110.14";
+import { RepUploader } from "./uploader.js?v=20261110.14";
 
 // 버전을 고정해 두었다. 올릴 때는 vision_bundle.mjs와 wasm 폴더가 같은 버전인지 확인할 것.
 const MP_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
@@ -76,7 +76,7 @@ export class CameraSession {
     this.uploader = null;
     this.reps = [];
     try {
-      this.onEvent({ type: "status", text: "카메라를 켜는 중…" });
+      this.onEvent({ type: "status", text: "연결 중" });
       this.stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
         audio: false,
@@ -86,7 +86,7 @@ export class CameraSession {
       this.canvas.width = this.video.videoWidth;
       this.canvas.height = this.video.videoHeight;
 
-      this.onEvent({ type: "status", text: "자세 인식 모델을 불러오는 중… (처음에는 몇 초 걸립니다)" });
+      this.onEvent({ type: "status", text: "모델 로딩" });
       this.landmarker = await getLandmarker();
 
       if (api) {
@@ -99,7 +99,7 @@ export class CameraSession {
       throw new Error(e.name ? cameraErrorMessage(e) : e.message);
     }
     this.running = true;
-    this.onEvent({ type: "status", text: "분석 중 — 옆모습이 보이게 전신을 화면에 맞춰 주세요" });
+    this.onEvent({ type: "status", text: "분석 중" });
     this._lastVideoTime = -1;
     this._raf = requestAnimationFrame(() => this._tick());
   }
@@ -154,7 +154,7 @@ export class CameraSession {
     this._releaseCamera();
     this.canvas.getContext("2d").clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (!this.uploader) return null;
-    this.onEvent({ type: "status", text: "결과를 저장하는 중…" });
+    this.onEvent({ type: "status", text: "저장 중" });
     const finished = await this.uploader.finish();
     this._emitUpload();
     return finished;
