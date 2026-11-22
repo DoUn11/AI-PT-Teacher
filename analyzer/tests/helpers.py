@@ -54,3 +54,18 @@ def cycle(top: float, bottom: float, frames: int = 30) -> list[float]:
 def run(analyzer, poses, start_t: float = 0.0):
     """포즈 목록을 FPS 간격으로 넣고 프레임 결과를 모은다."""
     return [analyzer.process(p, start_t + i / FPS) for i, p in enumerate(poses)]
+
+
+def frontal_pose(knee_h: float = -0.9, shin: float = 0.9) -> Pose:
+    """카메라를 마주 보고 선 자세 (몸통 100px, 어깨 폭 40px, 전부 잘 보임). 왼쪽 무릎을 knee_h(몸통 대비 골반
+    위 높이)까지 들고, 왼발목은 무릎 아래 shin(몸통 대비)에 둔다. frontend/tests/helpers.js frontalPose와 같다."""
+    knee_y = 200 - knee_h * 100
+    pts = {
+        "nose": (100, 60), "left_eye": (105, 58), "right_eye": (95, 58), "left_ear": (110, 62), "right_ear": (90, 62),
+        "left_shoulder": (120, 100), "right_shoulder": (80, 100), "left_elbow": (130, 150), "right_elbow": (70, 150),
+        "left_wrist": (135, 195), "right_wrist": (65, 195), "left_hip": (115, 200), "right_hip": (85, 200),
+        "left_knee": (115, knee_y), "right_knee": (85, 290), "left_ankle": (115, knee_y + shin * 100),
+        "right_ankle": (85, 380),
+    }
+    xy = np.array([pts[k] for k in KEYPOINT_INDEX], dtype=float)
+    return Pose(xy, np.full(17, 0.9))

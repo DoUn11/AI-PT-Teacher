@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from aipt_analyzer.features import FEATURES
+from aipt_analyzer.features import ALL_FEATURES as FEATURES
 
 CONFIG_DIR = Path(__file__).parent / "configs"
 
@@ -26,18 +26,43 @@ class DepthRule:
     min_score: float  # 깊이 때문에 떨어질 수 있는 점수의 하한
 
 
+STATS = ("min", "max", "mean")
+TIERS = ("strong", "medium", "weak")
+
+
 @dataclass(frozen=True)
 class FormCheck:
     """반복 동안의 특징 통계가 기준을 벗어나면 감점한다.
 
     stat="max"면 최댓값이 limit 이하여야 하고, stat="min"이면 최솟값이 limit 이상이어야 한다.
+    direction("above" | "below")을 주면 그 방향으로 limit을 넘을 때 위반이다 (예: stat="max", direction="below"는
+    "이 반복의 최댓값이 limit에 못 미치면 위반" = 무릎을 충분히 안 올림). stat="mean"은 direction이 꼭 있어야 한다.
+
+    정확도가 약한 조건을 보정하는 칸 (모두 생략 가능, 생략하면 예전 동작과 같다):
+        enabled  False면 측정·감점·피드백을 모두 하지 않는다 (지우지 않고 꺼 두기)
+        live     False면 동작 중 실시간 경고를 내지 않고, 반복이 끝난 뒤 피드백만 낸다
+        full_at  주면 감점이 limit에서 0, full_at에서 penalty가 되도록 선형으로 늘어난다
+                 (기준 근처의 애매한 판정은 조금만 깎는다). 없으면 넘는 순간 penalty 전부
+        tier     "strong" | "medium" | "weak" (판정 정확도 등급, 기록용)
     """
 
     code: str
     feature: str
-    stat: str  # "min" | "max"
+    stat: str  # "min" | "max" | "mean"
     limit: float
     penalty: float
+    direction: str | None = None  # "above" | "below". 생략하면 max는 above, min은 below
+    enabled: bool = True
+    live: bool = True
+    full_at: float | None = None
+    tier: str | None = None
+
+    @property
+    def violates_above(self) -> bool:
+        """값이 limit보다 커야 위반인가."""
+        if self.direction is not None:
+            return self.direction == "above"
+        return self.stat == "max"
 
 
 @dataclass(frozen=True)
@@ -52,6 +77,7 @@ class ExerciseConfig:
     min_rep_seconds: float  # 이보다 짧은 반복은 떨림으로 보고 버린다
     min_keypoint_conf: float
     depth: DepthRule
+    score_step: int = 1  # 점수를 이 단위로 반올림한다 (10이면 100, 90, ..., 0)
     form_checks: tuple[FormCheck, ...] = ()
     judge: dict[str, Any] = field(default_factory=lambda: {"type": "threshold"})
 
@@ -59,7 +85,9 @@ class ExerciseConfig:
     def from_dict(cls, d: dict[str, Any]) -> "ExerciseConfig":
         try:
             depth = DepthRule(**d["depth"])
-            checks = tuple(FormCheck(**c) for c in d.get("form_checks", []))
+            # "_"로 시작하는 칸(_ba_rep 같은 기록용 메모)은 무시한다
+            checks = tuple(FormCheck(**{k: v for k, v in c.items() if not k.startswith("_")})
+                           for c in d.get("form_checks", []))
             cfg = cls(
                 exercise=d["exercise"],
                 version=int(d["version"]),
@@ -71,6 +99,7 @@ class ExerciseConfig:
                 min_rep_seconds=float(d.get("min_rep_seconds", 0.4)),
                 min_keypoint_conf=float(d.get("min_keypoint_conf", 0.3)),
                 depth=depth,
+                score_step=int(d.get("score_step", 1)),
                 form_checks=checks,
                 judge=dict(d.get("judge", {"type": "threshold"})),
             )
@@ -90,11 +119,21 @@ class ExerciseConfig:
             raise ValueError("min_rep_seconds must be >= 0")
         if not 0 <= self.depth.min_score <= 100:
             raise ValueError("depth.min_score must be in [0, 100]")
+        if not 1 <= self.score_step <= 100:
+            raise ValueError("score_step must be in [1, 100]")
         for c in self.form_checks:
             if c.feature not in FEATURES:
                 raise ValueError(f"form check {c.code!r}: unknown feature {c.feature!r}")
-            if c.stat not in ("min", "max"):
-                raise ValueError(f"form check {c.code!r}: stat must be 'min' or 'max'")
+            if c.stat not in STATS:
+                raise ValueError(f"form check {c.code!r}: stat must be one of {STATS}")
+            if c.direction not in (None, "above", "below") or (c.stat == "mean" and c.direction is None):
+                raise ValueError(f"form check {c.code!r}: direction must be 'above' or 'below' (required for stat 'mean')")
+            if c.tier is not None and c.tier not in TIERS:
+                raise ValueError(f"form check {c.code!r}: tier must be one of {TIERS}")
+            if c.penalty < 0:
+                raise ValueError(f"form check {c.code!r}: penalty must be >= 0")
+            if c.full_at is not None and (c.full_at > c.limit) != c.violates_above:
+                raise ValueError(f"form check {c.code!r}: full_at must be on the violating side of limit")
 
 
 def available_exercises() -> list[str]:

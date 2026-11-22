@@ -10,6 +10,7 @@ const MODEL_URL =
 
 // MediaPipe 33점 중 분석에 쓰는 관절의 인덱스 (분석기의 COCO 이름과 맞춘다)
 const MP_INDEX = {
+  nose: 0, left_ear: 7, right_ear: 8, // 고개 각도(head_pitch) 계산용
   left_shoulder: 11, right_shoulder: 12, left_elbow: 13, right_elbow: 14,
   left_wrist: 15, right_wrist: 16, left_hip: 23, right_hip: 24,
   left_knee: 25, right_knee: 26, left_ankle: 27, right_ankle: 28,
