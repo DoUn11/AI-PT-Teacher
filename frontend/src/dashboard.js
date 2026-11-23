@@ -1,8 +1,8 @@
 // 결과 확인 화면: 운동별 통계, 최근 세션 목록, 세션 상세(rep별 점수·피드백)
 import { AuthError } from "./api.js";
-import { DISPLAY_EXERCISE_LABELS, PLANNED_EXERCISE_LABELS, exerciseLabel, h } from "./dom.js?v=20261110.14";
+import { DISPLAY_EXERCISE_LABELS, PLANNED_EXERCISE_LABELS, exerciseLabel, h } from "./dom.js?v=20261123.3";
 
-import { createExercisePicker } from "./exercise-picker.js?v=20261110.14";
+import { createExercisePicker } from "./exercise-picker.js?v=20261123.3";
 
 const views = new WeakMap();
 const fmtDate = (iso) => new Date(iso).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" });
@@ -59,6 +59,7 @@ export async function loadDashboard(root, ctx) {
     const [stats, sessions] = await Promise.all([api.stats(), api.sessions(100)]);
     if (views.get(root) !== view) return;
     const choices = [...new Set([...Object.keys(exerciseLabels), ...stats.map(s => s.exercise), ...sessions.map(s => s.exercise)])]
+      .filter(value => value in exerciseLabels)
       .map(value => ({ value, label: label(value) }));
     const requested = new URLSearchParams(location.search).get("exercise");
     let selected = choices.some(c => c.value === requested) ? requested : choices[0].value;
