@@ -72,6 +72,8 @@ class ThresholdJudge:
         raw = max(0.0, min(100.0, 100.0 - depth_penalty - form_penalty))
         step = cfg.score_step
         score = int(round(raw / step) * step)
+        if score >= 100:  # 감점이 반올림으로 0이 될 만큼 기준선 근처면 지적하지 않는다 (100점 = 지적 없음)
+            feedback = []
         return Judgement(score=score, feedback=tuple(feedback))
 
     def live_feedback(self, values: Mapping[str, float]) -> list[str]:

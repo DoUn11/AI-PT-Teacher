@@ -170,6 +170,13 @@ test("score_step rounds the rep score to 10-point steps", () => {
   assert.equal(j.judge(repAt(90)).score, 80);
 });
 
+test("score 100 carries no feedback", () => {
+  const j = judgeWith([lean({ full_at: 60 })], { score_step: 10 });
+  assert.deepEqual(j.judge(repAt(44)), { score: 100, feedback: [] }); // 96 -> 100: 지적 없음
+  assert.deepEqual(j.judge(repAt(46)), { score: 90, feedback: ["trunk_lean"] });
+  assert.deepEqual(j.liveFeedback({ trunk_lean: 44 }), ["trunk_lean"]); // 실시간 경고는 그대로
+});
+
 test("invalid weak-condition fields are rejected", () => {
   const base = load("squat");
   const bad = (c, extra = {}) => () => validateConfig({ ...base, form_checks: [lean(c)], ...extra });

@@ -246,6 +246,13 @@ def test_score_step_rounds_rep_score_to_10_point_steps():
     assert [j.judge(_rep_at(x)).score for x in (44, 46, 50, 90)] == [100, 90, 90, 80]
 
 
+def test_score_100_carries_no_feedback():
+    j = _judge_with([_lean(full_at=60)], score_step=10)
+    assert (j.judge(_rep_at(44)).score, j.judge(_rep_at(44)).feedback) == (100, ())  # 96 -> 100: 지적 없음
+    assert (j.judge(_rep_at(46)).score, j.judge(_rep_at(46)).feedback) == (90, ("trunk_lean",))
+    assert j.live_feedback({"trunk_lean": 44}) == ["trunk_lean"]  # 실시간 경고는 그대로
+
+
 @pytest.mark.parametrize(
     "check,extra",
     [

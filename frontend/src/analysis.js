@@ -288,7 +288,8 @@ export class ThresholdJudge {
     const raw = Math.max(0, Math.min(100, 100 - depthPenalty - formPenalty));
     const step = this.cfg.score_step ?? 1;
     const score = roundHalfEven(raw / step) * step;
-    return { score, feedback };
+    // 감점이 반올림으로 0이 될 만큼 기준선 근처면 지적하지 않는다 (100점 = 지적 없음)
+    return { score, feedback: score >= 100 ? [] : feedback };
   }
 
   liveFeedback(values) {
