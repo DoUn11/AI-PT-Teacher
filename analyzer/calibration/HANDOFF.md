@@ -180,15 +180,36 @@ BA는 특징 1개(임계값 하나, 앱 방식) 기준. 괄호는 여러 특징 
 4. ~~약한 조건 개선~~ 실험 끝 (위 표). 남은 것: 앱에 니업 정자세 기준 동작 1회 받는 흐름 추가(프론트 협의), 다리 긴장/푸시업 가슴·손은 약한 경고로.
 5. 푸시업 Day37,38(3D만 있음)에도 MP를 돌려 학습 데이터 늘리기 (유형 번호로 정오 정보 붙이기 가능).
 
-## 다음 세션 시작점 (2026-11-22, 데스크탑 -> 노트북)
-- 작업은 브랜치 `feat/calibration`에 있다 (main에는 아직 안 합침). 자동 테스트는 통과 (파이썬 57, 프론트 29).
-- 하려던 것: main에 합치기 전 테스트.
-  1. 실제 데이터로 앱 판정 돌려 보기: `_work/mp` 의 MediaPipe 좌표를 COCO 17점으로 바꿔 `aipt_analyzer`(RepCounter + ThresholdJudge)에
-     프레임 단위로 넣고, 정자세 클립은 높은 점수 / 위반 클립은 맞는 피드백 / 회 수가 맞는지 운동별로 본다.
-     32장이 띄엄띄엄이라 시간 간격은 가정해야 한다 (min_rep_seconds 걸림 주의).
-  2. 웹캠: 백엔드(포트 8000) + `cd frontend; python -m http.server 5173` -> 로그인 -> 푸시업은 바로 가능.
-  3. 니업/사크를 웹에서 해 보려면 `frontend/src/dom.js` EXERCISE_LABELS와 백엔드 `backend/app/modules/workouts/models.py`
-     `Exercise` enum에 추가해야 한다 (백엔드에 없으면 기록 저장 실패). 추가할지 아직 결정 안 함.
+## 앱 재생 데이터 테스트 (2026-11-23, `replay_app.py`, 데스크탑)
+MP 좌표를 앱 Analyzer(스무딩 -> RepCounter -> ThresholdJudge)에 그대로 넣음. 사진 간격 0.15/0.25/0.4초 가정, 15fps 보간.
+결과 전체: `_work/out_replay_report.md`, 회/클립 CSV: `_work/out_replay/`. 아래는 0.25초 (괄호 = 세 가정 범위).
+| 운동 | 조건 | 위반 회 잡음 | 정상 회 오경보 | 1회 BA |
+|---|---|---|---|---|
+| kneeup | knee_low | 96% | 36% (28~47%) | 0.80 |
+| kneeup | spine_bend | 72% | 9% | 0.82 |
+| sidecrunch | hands_behind_head | 98% | 5% | 0.97 |
+| sidecrunch | knee_side | 95% | 14% | 0.90 |
+| sidecrunch | elbow_knee_close | 90% | 38% (33~48%) | 0.76 |
+| sidecrunch | head_down | 59% | 5% | 0.77 |
+| pushup | hand_width | 88% | 20% | 0.84 |
+| pushup | hand_position | 75% | 22% | 0.77 |
+| pushup | shallow_depth | 36% | 3% | 0.66 |
+- 프레임별 특징 값은 앱과 보정 코드가 같다. 차이는 1회 자르기와 스무딩에서 온다.
+- "도달해야 하는" 조건(knee_low, elbow_knee_close)만 오경보가 크게 늘었다. 원인: (1) 스무딩(0.6)이 한 장뿐인 꼭대기를 깎음
+  (끄면 knee_low 36% -> 24%), (2) 앱 고정 임계는 사진이 덜 올라간 순간에 찍힌 회도 1회로 셈. 둘 다 띄엄띄엄 사진 탓이 커서
+  웹캠에서는 줄 것으로 보지만 확인 필요. 웹캠에서도 많으면 그 두 limit을 조금 완화.
+- 정자세 클립 점수: 니업 평균 94, 사크 98, 푸시업 95. 정자세 클립 중 한 번도 못 센 클립: 니업 0%, 사크 18%, 푸시업 20%.
+- 푸시업 정자세에서 실시간 경고(hand_width)가 프레임 16%에 뜸 (위반 클립 30%).
+- 점수가 100점인데 피드백 코드가 붙는 회가 1~7% 있었다 (full_at 등급 감점이 10점 반올림으로 0이 되는 경우).
+  -> 고침 (2026-11-27): 1회 점수가 100점이면 피드백을 붙이지 않는다 (파이썬 judges.py, 프론트 analysis.js 둘 다). 실시간 경고는 그대로.
+- 웹캠 실제 테스트 (2026-11-27): 푸시업/니업/사크 모두 잘 동작함 (사용자 확인). 오경보 때문에 limit을 완화할 필요는 아직 없음.
+
+## 다음 세션 시작점 (2026-11-27 갱신)
+- 작업은 브랜치 `feat/calibration`에 있다 (main에는 아직 안 합침).
+- main 합치기 전 테스트는 끝났다: 재생 데이터 테스트(위 표), 웹캠 테스트(세 운동 정상), 니업/사크를 백엔드 `Exercise` enum과
+  프론트 목록에 추가(d521ed0). 웹캠에서 `?debug=1`을 붙이면 프레임별 CSV를 받을 수 있다.
+- 남은 것: main으로 PR. 그 뒤 할 일은 위 "다음 할 일" 4, 5번 (니업 정자세 기준 동작 흐름, 푸시업 Day37,38 MP).
+- 웹캠 실행: 백엔드(포트 8000) + `cd frontend; python -m http.server 5173` -> 로그인.
 - 노트북 준비: `_work`에서 `mpvenv`를 뺀 폴더(약 113MB: mp, out_mp, out_rep, out_extra, models 등)를 옮긴다.
   mediapipe는 좌표를 다시 뽑을 때만 필요하다 (새로 설치). 원본 데이터셋도 재추출할 때만 필요.
 
@@ -202,6 +223,7 @@ BA는 특징 1개(임계값 하나, 앱 방식) 기준. 괄호는 여러 특징 
   `--views M+T` 처럼 접두어를 묶을 수 있고, `--exclude-ref`로 사람별 기준 클립을 뺀다.
 - `rep_features.py` : MP 좌표를 동작 1회 단위로 잘라 1회마다 특징 요약 (`_work\out_rep\`).
 - `calibrate.py` : 1회 데이터 -> 운동 설정 JSON (`--out ../aipt_analyzer/configs`). 조건/등급 표는 파일 안 EXERCISES, TIER.
+- `replay_app.py` : MP 좌표를 앱 Analyzer에 넣어 회 수/점수/피드백 확인 (`--mp mp --labels out_mp --dt 0.15 0.25 0.4`).
 - `extra_features.py` : 시간 특징(T_), 사람별 정규화(P_, Q_) 열을 더한 CSV를 만든다 (`_work\out_extra\`).
 - 이미 만들어진 결과(PC, `D:\데이터\AI_PT_선택운동\_work\`): `out\`(푸시업 2D), `out3d\`(3D), `out_standing\`(서 있는 운동 라벨),
   `mp\`(MediaPipe npz), `out_mp\`(MediaPipe CSV + `eval_summary.md`), `mpvenv\`(mediapipe 설치된 가상환경), `models\`(lite 모델).
