@@ -1,7 +1,7 @@
 // 노트북 웹캠(라즈베리파이 대용) -> 브라우저 자세 추정(MediaPipe) -> 분석 -> 영상 위 표시 -> 백엔드 업로드
-import { Analyzer } from "./analysis.js?v=20261123.3";
-import { drawOverlay, FLASH_MS } from "./overlay.js?v=20261123.3";
-import { RepUploader } from "./uploader.js?v=20261123.3";
+import { Analyzer } from "./analysis.js?v=20261127.1";
+import { drawOverlay, FLASH_MS } from "./overlay.js?v=20261127.1";
+import { RepUploader } from "./uploader.js?v=20261127.1";
 
 // 버전을 고정해 두었다. 올릴 때는 vision_bundle.mjs와 wasm 폴더가 같은 버전인지 확인할 것.
 const MP_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
