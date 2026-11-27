@@ -54,3 +54,15 @@ export function run(analyzer, poses, startT = 0) {
 }
 
 export const repsOf = (frames) => frames.map((f) => f.rep).filter(Boolean);
+
+// analyzer/tests/helpers.py frontal_pose 와 같은 정면 자세 (전부 잘 보임, 몸통 100px, 어깨 폭 40px)
+export function frontalPose(kneeH = -0.9, shin = 0.9) {
+  const kneeY = 200 - kneeH * 100;
+  const xy = {
+    nose: [100, 60], left_ear: [110, 62], right_ear: [90, 62],
+    left_shoulder: [120, 100], right_shoulder: [80, 100], left_elbow: [130, 150], right_elbow: [70, 150],
+    left_wrist: [135, 195], right_wrist: [65, 195], left_hip: [115, 200], right_hip: [85, 200],
+    left_knee: [115, kneeY], right_knee: [85, 290], left_ankle: [115, kneeY + shin * 100], right_ankle: [85, 380],
+  };
+  return { xy, conf: Object.fromEntries(Object.keys(xy).map((k) => [k, 0.9])) };
+}

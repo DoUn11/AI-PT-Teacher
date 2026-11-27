@@ -7,7 +7,7 @@ from aipt_analyzer import Analyzer, ExerciseConfig, load_exercise_config
 from aipt_analyzer.config import available_exercises
 from aipt_analyzer.features import extract_features
 from aipt_analyzer.pose import Pose, angle_deg, vertical_lean_deg
-from tests.helpers import cycle, pushup_pose, run, squat_pose
+from tests.helpers import cycle, frontal_pose, pushup_pose, run, squat_pose
 
 
 def reps_of(frames):
@@ -53,10 +53,16 @@ def test_pose_row_roundtrip_and_validation():
 
 
 def test_builtin_configs_load():
-    assert {"squat", "pushup"} <= set(available_exercises())
-    for name in ("squat", "pushup"):
+    assert {"squat", "pushup", "kneeup", "sidecrunch"} <= set(available_exercises())
+    for name in ("squat", "pushup", "kneeup", "sidecrunch"):
         cfg = load_exercise_config(name)
-        assert cfg.exercise == name and cfg.calibrated is False
+        assert cfg.exercise == name
+    assert load_exercise_config("squat").calibrated is False  # 스쿼트는 데이터 보정 대상이 아니다
+    for name in ("pushup", "kneeup", "sidecrunch"):  # calibration/calibrate.py가 만든 설정
+        cfg = load_exercise_config(name)
+        assert cfg.calibrated is True and cfg.score_step == 10
+        gaze = [c for c in cfg.form_checks if c.code in ("gaze_front", "leg_tension")]
+        assert all(not c.enabled for c in gaze)  # 시선, 다리 긴장은 꺼 둔다 (HANDOFF.md 결정)
 
 
 def _cfg_dict(**overrides):
@@ -168,10 +174,135 @@ def test_start_count_continues_numbering():
 # ---- 푸시업 ---------------------------------------------------------------
 
 
-def test_pushups_counted_with_body_line_check():
+def test_pushups_counted_and_shallow_ones_penalised_lightly():
     cfg = load_exercise_config("pushup")
     good = reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 80)]))
-    assert len(good) == 1 and good[0].feedback == () and good[0].score >= 95
+    assert len(good) == 1 and good[0].feedback == () and good[0].score == 100
 
+    # 몸 일직선(body_line)은 정면 카메라에서 판정하지 않으므로 꺼져 있다
     sag = reps_of(run(Analyzer(cfg), [pushup_pose(e, hip_offset=60) for e in cycle(170, 80)]))
-    assert len(sag) == 1 and "body_line" in sag[0].feedback and sag[0].score <= 80
+    assert len(sag) == 1 and sag[0].feedback == ()
+
+    # 얕은 푸시업도 1회로 세고(count_threshold 140), 약한 조건이라 조금만 깎는다.
+    # 2초짜리 동작: 1초면 150도 아래에 머무는 시간이 min_rep_seconds(0.6초)보다 짧아 떨림으로 버려진다
+    shallow = reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 136, frames=60)]))
+    assert len(shallow) == 1 and shallow[0].feedback == ("shallow_depth",) and shallow[0].score == 90
+
+
+# ---- 약한 조건 보정 칸 (enabled, live, full_at, stat mean, score_step) ----
+# 프론트엔드 frontend/tests/analysis.test.js 의 같은 이름 테스트와 숫자가 같아야 한다.
+
+from aipt_analyzer.judges import ThresholdJudge  # noqa: E402
+from aipt_analyzer.results import RepSummary  # noqa: E402
+
+
+def _lean(**more):
+    return {"code": "trunk_lean", "feature": "trunk_lean", "stat": "max", "limit": 40, "penalty": 20, **more}
+
+
+def _judge_with(checks, **extra):
+    return ThresholdJudge(ExerciseConfig.from_dict(_cfg_dict(form_checks=checks, **extra)))
+
+
+def _rep_at(lean):
+    return RepSummary(index=1, start_t=0, end_t=1, primary_feature="knee_angle", primary_min=90,
+                      stats={"trunk_lean": {"min": lean, "max": lean, "mean": lean}})
+
+
+def test_disabled_check_is_not_judged_penalised_or_shown_live():
+    j = _judge_with([_lean(enabled=False)])
+    r = j.judge(_rep_at(80))
+    assert (r.score, r.feedback) == (100, ())
+    assert j.live_feedback({"trunk_lean": 80}) == []
+
+
+def test_live_false_keeps_after_rep_feedback_but_drops_live_warning():
+    j = _judge_with([_lean(live=False)])
+    r = j.judge(_rep_at(50))
+    assert (r.score, r.feedback) == (80, ("trunk_lean",))
+    assert j.live_feedback({"trunk_lean": 50}) == []
+
+
+def test_full_at_grades_penalty_by_distance_past_limit():
+    j = _judge_with([_lean(full_at=60)])
+    assert [j.judge(_rep_at(x)).score for x in (45, 50, 90, 40)] == [95, 90, 80, 100]
+
+
+def test_direction_flips_which_side_of_limit_is_a_violation():
+    j = _judge_with([_lean(direction="below")])  # 최댓값이 40에 못 미치면 위반
+    assert (j.judge(_rep_at(30)).score, j.judge(_rep_at(30)).feedback) == (80, ("trunk_lean",))
+    assert j.judge(_rep_at(50)).score == 100
+
+
+def test_stat_mean_uses_direction():
+    j = _judge_with([{"code": "low", "feature": "trunk_lean", "stat": "mean", "direction": "below",
+                      "limit": 10, "penalty": 30}])
+    assert (j.judge(_rep_at(5)).score, j.judge(_rep_at(5)).feedback) == (70, ("low",))
+    assert j.judge(_rep_at(15)).score == 100
+
+
+def test_score_step_rounds_rep_score_to_10_point_steps():
+    j = _judge_with([_lean(full_at=60)], score_step=10)
+    assert [j.judge(_rep_at(x)).score for x in (44, 46, 50, 90)] == [100, 90, 90, 80]
+
+
+def test_score_100_carries_no_feedback():
+    j = _judge_with([_lean(full_at=60)], score_step=10)
+    assert (j.judge(_rep_at(44)).score, j.judge(_rep_at(44)).feedback) == (100, ())  # 96 -> 100: 지적 없음
+    assert (j.judge(_rep_at(46)).score, j.judge(_rep_at(46)).feedback) == (90, ("trunk_lean",))
+    assert j.live_feedback({"trunk_lean": 44}) == ["trunk_lean"]  # 실시간 경고는 그대로
+
+
+@pytest.mark.parametrize(
+    "check,extra",
+    [
+        (_lean(full_at=30), {}),  # max 조건인데 full_at이 limit보다 작음
+        (_lean(stat="mean"), {}),  # mean인데 direction 없음
+        (_lean(direction="sideways"), {}),
+        (_lean(tier="great"), {}),
+        (_lean(penalty=-1), {}),
+        (_lean(), {"score_step": 0}),
+    ],
+)
+def test_invalid_weak_condition_fields_rejected(check, extra):
+    with pytest.raises(ValueError):
+        ExerciseConfig.from_dict(_cfg_dict(form_checks=[check], **extra))
+
+
+def test_weak_condition_fields_accepted():
+    cfg = ExerciseConfig.from_dict(_cfg_dict(form_checks=[_lean(tier="weak", live=False, full_at=60)], score_step=10))
+    assert cfg.score_step == 10 and cfg.form_checks[0].live is False
+
+
+# ---- 정면 촬영용 양쪽 몸·얼굴 특징, 니업 ------------------------------------
+# 숫자는 frontend/tests/analysis.test.js 의 같은 이름 테스트와 같아야 한다.
+
+
+def test_body_features_on_frontal_pose():
+    v = extract_features(frontal_pose(-0.9)).values
+    expected = {"torso_sw": 2.5, "knee_gap": 0.9, "hip_flex": 177.137595, "knee_lat": 0.0, "ankle_lift": 0.0,
+                "head_pitch": 0.02, "head_yaw": 0.0, "elbow_angle_both": 175.030259,
+                "shoulder_angle_both": 14.172338, "hand_ratio": 1.75}
+    for k, x in expected.items():
+        assert v[k] == pytest.approx(x, abs=1e-5), k
+    lifted = extract_features(frontal_pose(0.1)).values
+    assert lifted["knee_gap"] == pytest.approx(-0.1) and lifted["ankle_lift"] == pytest.approx(1.0)
+
+
+def test_body_features_skip_when_face_not_visible():
+    pose = frontal_pose()
+    conf = pose.conf.copy()
+    conf[0] = 0.1  # nose
+    v = extract_features(Pose(pose.xy, conf)).values
+    assert "head_pitch" not in v and "head_yaw" not in v and "torso_sw" in v
+
+
+def test_kneeup_counts_lifts_and_flags_low_knee():
+    a = Analyzer(load_exercise_config("kneeup"))
+    good = reps_of(run(a, [frontal_pose(k) for _ in range(2) for k in cycle(-0.9, 0.0)]))
+    assert len(good) == 2 and all(r.score == 100 and r.feedback == () for r in good)
+
+    a = Analyzer(load_exercise_config("kneeup"))
+    low = reps_of(run(a, [frontal_pose(k) for k in cycle(-0.9, -0.38)]))
+    assert len(low) == 1  # 무릎이 덜 올라와도 1회로 센다
+    assert low[0].feedback == ("knee_low",) and low[0].score == 70

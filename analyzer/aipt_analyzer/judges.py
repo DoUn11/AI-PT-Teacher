@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Callable, Mapping, Protocol
 
-from aipt_analyzer.config import ExerciseConfig
+from aipt_analyzer.config import ExerciseConfig, FormCheck
 from aipt_analyzer.results import Judgement, RepSummary
 
 
@@ -62,23 +62,38 @@ class ThresholdJudge:
         form_penalty = 0.0
         for check in cfg.form_checks:
             stat = summary.stats.get(check.feature)
-            if stat is None:  # 이 반복에서 해당 관절이 안 보였으면 판단하지 않는다
+            if not check.enabled or stat is None:  # 꺼 둔 조건, 이 반복에서 관절이 안 보인 조건은 판단하지 않는다
                 continue
-            if self._violates(check.stat, check.limit, stat[check.stat]):
+            value = stat[check.stat]
+            if self._violates(check, value):
                 feedback.append(check.code)
-                form_penalty += check.penalty
+                form_penalty += self._penalty(check, value)
 
-        score = int(round(max(0.0, min(100.0, 100.0 - depth_penalty - form_penalty))))
+        raw = max(0.0, min(100.0, 100.0 - depth_penalty - form_penalty))
+        step = cfg.score_step
+        score = int(round(raw / step) * step)
+        if score >= 100:  # 감점이 반올림으로 0이 될 만큼 기준선 근처면 지적하지 않는다 (100점 = 지적 없음)
+            feedback = []
         return Judgement(score=score, feedback=tuple(feedback))
 
     def live_feedback(self, values: Mapping[str, float]) -> list[str]:
         codes = []
         for check in self._cfg.form_checks:
+            if not (check.enabled and check.live):
+                continue
             value = values.get(check.feature)
-            if value is not None and self._violates(check.stat, check.limit, value):
+            if value is not None and self._violates(check, value):
                 codes.append(check.code)
         return codes
 
     @staticmethod
-    def _violates(stat: str, limit: float, value: float) -> bool:
-        return value > limit if stat == "max" else value < limit
+    def _violates(check: FormCheck, value: float) -> bool:
+        return value > check.limit if check.violates_above else value < check.limit
+
+    @staticmethod
+    def _penalty(check: FormCheck, value: float) -> float:
+        """위반한 조건의 감점. full_at이 있으면 기준에서 멀어질수록 penalty까지 늘어난다."""
+        if check.full_at is None:
+            return check.penalty
+        frac = (value - check.limit) / (check.full_at - check.limit)
+        return check.penalty * min(1.0, max(0.0, frac))

@@ -1,7 +1,7 @@
 // 노트북 웹캠(라즈베리파이 대용) -> 브라우저 자세 추정(MediaPipe) -> 분석 -> 영상 위 표시 -> 백엔드 업로드
-import { Analyzer } from "./analysis.js?v=20261110.14";
-import { drawOverlay, FLASH_MS } from "./overlay.js?v=20261110.14";
-import { RepUploader } from "./uploader.js?v=20261110.14";
+import { Analyzer } from "./analysis.js?v=20261127.1";
+import { drawOverlay, FLASH_MS } from "./overlay.js?v=20261127.1";
+import { RepUploader } from "./uploader.js?v=20261127.1";
 
 // 버전을 고정해 두었다. 올릴 때는 vision_bundle.mjs와 wasm 폴더가 같은 버전인지 확인할 것.
 const MP_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
@@ -10,6 +10,7 @@ const MODEL_URL =
 
 // MediaPipe 33점 중 분석에 쓰는 관절의 인덱스 (분석기의 COCO 이름과 맞춘다)
 const MP_INDEX = {
+  nose: 0, left_ear: 7, right_ear: 8, // 고개 각도(head_pitch) 계산용
   left_shoulder: 11, right_shoulder: 12, left_elbow: 13, right_elbow: 14,
   left_wrist: 15, right_wrist: 16, left_hip: 23, right_hip: 24,
   left_knee: 25, right_knee: 26, left_ankle: 27, right_ankle: 28,
@@ -75,6 +76,7 @@ export class CameraSession {
     this.flash = null;
     this.uploader = null;
     this.reps = [];
+    this.trace = new URLSearchParams(globalThis.location?.search).has("debug") ? [] : null;
     try {
       this.onEvent({ type: "status", text: "연결 중" });
       this.stream = await navigator.mediaDevices.getUserMedia({
@@ -115,6 +117,7 @@ export class CameraSession {
       const result = this.landmarker.detectForVideo(video, now);
       const pose = result.landmarks?.[0] ? toPose(result.landmarks[0], w, h) : null;
       const frame = this.analyzer.process(pose, now / 1000);
+      this._record(now / 1000, pose, frame);
 
       if (frame.rep) {
         this.flash = { rep: frame.rep, until: now + FLASH_MS };
@@ -132,6 +135,42 @@ export class CameraSession {
       });
     }
     this._raf = requestAnimationFrame(() => this._tick());
+  }
+
+  // 디버그: 주소에 ?debug=1 이 있으면 프레임마다 좌표·특징을 모았다가 멈출 때 CSV로 내려받는다.
+  _record(t, pose, frame) {
+    if (!this.trace) return;
+    const row = { t: t.toFixed(3), phase: frame.phase, reps: frame.reps, visible: frame.visible ? 1 : 0 };
+    if (pose) {
+      for (const [name, [x, y]] of Object.entries(pose.xy)) {
+        row[`${name}_x`] = x.toFixed(1);
+        row[`${name}_y`] = y.toFixed(1);
+        row[`${name}_v`] = pose.conf[name].toFixed(2);
+      }
+    }
+    for (const [name, v] of Object.entries(frame.features)) row[`f_${name}`] = v.toFixed(4);
+    row.live = frame.liveFeedback.join("|");
+    if (frame.rep) {
+      row.rep_score = frame.rep.score;
+      row.rep_feedback = frame.rep.feedback.join("|");
+      row.rep_stats = JSON.stringify(Object.fromEntries(
+        Object.entries(frame.rep.summary.stats).map(([k, s]) => [k, [s.min, s.max, s.mean].map((x) => +x.toFixed(3))])));
+    }
+    this.trace.push(row);
+  }
+
+  _downloadTrace() {
+    const rows = this.trace;
+    this.trace = null;
+    if (!rows?.length) return;
+    const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+    const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
+    const csv = [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = `aipt_trace_${this.cfg.exercise}_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   _emitUpload() {
@@ -152,6 +191,7 @@ export class CameraSession {
     this.running = false;
     cancelAnimationFrame(this._raf);
     this._releaseCamera();
+    this._downloadTrace();
     this.canvas.getContext("2d").clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (!this.uploader) return null;
     this.onEvent({ type: "status", text: "저장 중" });

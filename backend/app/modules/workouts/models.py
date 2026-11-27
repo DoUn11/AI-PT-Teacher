@@ -11,6 +11,8 @@ from app.modules.auth.models import utcnow
 class Exercise(str, enum.Enum):
     SQUAT = "squat"
     PUSHUP = "pushup"
+    KNEEUP = "kneeup"
+    SIDECRUNCH = "sidecrunch"
 
 
 class SessionStatus(str, enum.Enum):
