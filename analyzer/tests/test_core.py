@@ -6,7 +6,7 @@ import pytest
 from aipt_analyzer import Analyzer, ExerciseConfig, load_exercise_config
 from aipt_analyzer.config import available_exercises
 from aipt_analyzer.features import extract_features
-from aipt_analyzer.pose import Pose, angle_deg, vertical_lean_deg
+from aipt_analyzer.pose import KEYPOINT_INDEX, Pose, angle_deg, vertical_lean_deg
 from tests.helpers import cycle, frontal_pose, pushup_pose, run, squat_pose
 
 
@@ -282,11 +282,34 @@ def test_body_features_on_frontal_pose():
     v = extract_features(frontal_pose(-0.9)).values
     expected = {"torso_sw": 2.5, "knee_gap": 0.9, "hip_flex": 177.137595, "knee_lat": 0.0, "ankle_lift": 0.0,
                 "head_pitch": 0.02, "head_yaw": 0.0, "elbow_angle_both": 175.030259,
-                "shoulder_angle_both": 14.172338, "hand_ratio": 1.75}
+                "shoulder_angle_both": 14.172338, "hand_ratio": 1.75, "hand_out": 0.375}
     for k, x in expected.items():
         assert v[k] == pytest.approx(x, abs=1e-5), k
     lifted = extract_features(frontal_pose(0.1)).values
     assert lifted["knee_gap"] == pytest.approx(-0.1) and lifted["ankle_lift"] == pytest.approx(1.0)
+
+
+def _frontal_with(**moves):
+    pose = frontal_pose()
+    xy = pose.xy.copy()
+    for name, pt in moves.items():
+        xy[KEYPOINT_INDEX[name]] = pt
+    return Pose(xy, pose.conf)
+
+
+def test_hand_out_uses_wider_hand_and_is_mirror_safe():
+    # 한쪽 손만 넓음: 오른손은 어깨 바로 아래(0), 왼손은 어깨보다 15px(어깨 폭 40px의 0.375) 바깥
+    one = extract_features(_frontal_with(right_wrist=(80, 195))).values
+    assert one["hand_out"] == pytest.approx(0.375)
+    # 좌우 이름이 바뀌어도(카메라 반전) 같은 값
+    pose = frontal_pose()
+    swap = [KEYPOINT_INDEX[k.replace("left_", "#").replace("right_", "left_").replace("#", "right_")]
+            for k in KEYPOINT_INDEX]
+    mirrored = extract_features(Pose(pose.xy[swap], pose.conf)).values
+    assert mirrored["hand_out"] == pytest.approx(0.375)
+    # 손목이 어깨 안쪽이면 음수
+    narrow = extract_features(_frontal_with(left_wrist=(110, 195), right_wrist=(90, 195))).values
+    assert narrow["hand_out"] == pytest.approx(-0.25)
 
 
 def test_body_features_skip_when_face_not_visible():

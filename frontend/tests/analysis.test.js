@@ -194,11 +194,32 @@ test("invalid weak-condition fields are rejected", () => {
 test("body features on a frontal pose", () => {
   const v = extractFeatures(frontalPose(-0.9)).values;
   const expected = { torso_sw: 2.5, knee_gap: 0.9, hip_flex: 177.137595, knee_lat: 0, ankle_lift: 0, head_pitch: 0.02,
-    head_yaw: 0, elbow_angle_both: 175.030259, shoulder_angle_both: 14.172338, hand_ratio: 1.75 };
+    head_yaw: 0, elbow_angle_both: 175.030259, shoulder_angle_both: 14.172338, hand_ratio: 1.75, hand_out: 0.375 };
   for (const [k, x] of Object.entries(expected)) near(v[k], x, 1e-5);
   const lifted = extractFeatures(frontalPose(0.1)).values;
   near(lifted.knee_gap, -0.1, 1e-9);
   near(lifted.ankle_lift, 1, 1e-9);
+});
+
+test("hand_out uses the wider hand and is mirror safe", () => {
+  // 한쪽 손만 넓음: 오른손은 어깨 바로 아래(0), 왼손은 어깨보다 15px(어깨 폭 40px의 0.375) 바깥
+  const one = frontalPose();
+  one.xy.right_wrist = [80, 195];
+  near(extractFeatures(one).values.hand_out, 0.375, 1e-9);
+  // 좌우 이름이 바뀌어도(카메라 반전) 같은 값
+  const p = frontalPose();
+  const flip = (k) => k.replace("left_", "#").replace("right_", "left_").replace("#", "right_");
+  const mirrored = { xy: {}, conf: {} };
+  for (const k of Object.keys(p.xy)) {
+    mirrored.xy[flip(k)] = p.xy[k];
+    mirrored.conf[flip(k)] = p.conf[k];
+  }
+  near(extractFeatures(mirrored).values.hand_out, 0.375, 1e-9);
+  // 손목이 어깨 안쪽이면 음수
+  const narrow = frontalPose();
+  narrow.xy.left_wrist = [110, 195];
+  narrow.xy.right_wrist = [90, 195];
+  near(extractFeatures(narrow).values.hand_out, -0.25, 1e-9);
 });
 
 test("body features skip when the face is not visible", () => {

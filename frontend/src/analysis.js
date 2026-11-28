@@ -112,6 +112,17 @@ export const BODY_FEATURES = {
     const sw = norm(sub(p.left_shoulder, p.right_shoulder));
     return sw > 1e-6 ? norm(sub(p.left_wrist, p.right_wrist)) / sw : null;
   } },
+  // 손목이 같은 쪽 어깨보다 바깥(어깨 중점 반대쪽)으로 나간 가로 거리 / 어깨 너비. 양손 중 큰 값.
+  hand_out: { keypoints: both("shoulder", "wrist"), compute: (p) => {
+    const sw = norm(sub(p.left_shoulder, p.right_shoulder));
+    if (sw < 1e-6) return null;
+    const m = mid(p.left_shoulder, p.right_shoulder);
+    return Math.max(...["left", "right"].map((s) => {
+      const out = sub(p[`${s}_shoulder`], m);
+      const w = sub(p[`${s}_wrist`], p[`${s}_shoulder`]);
+      return (w[0] * out[0] + w[1] * out[1]) / (sw / 2) / sw;
+    }));
+  } },
 };
 const ALL_FEATURES = { ...FEATURES, ...BODY_FEATURES };
 
