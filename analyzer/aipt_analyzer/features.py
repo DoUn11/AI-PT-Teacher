@@ -132,6 +132,19 @@ def _hand_ratio(p):
     return float(np.linalg.norm(p["left_wrist"] - p["right_wrist"])) / sw if sw > 1e-6 else None
 
 
+def _hand_out(p):
+    """손목이 같은 쪽 어깨보다 바깥(어깨 중점 반대쪽)으로 나간 가로 거리 / 어깨 너비. 양손 중 큰 값."""
+    mid = (p["left_shoulder"] + p["right_shoulder"]) / 2
+    sw = float(np.linalg.norm(p["left_shoulder"] - p["right_shoulder"]))
+    if sw < 1e-6:
+        return None
+    outs = []
+    for s in ("left", "right"):
+        out = (p[f"{s}_shoulder"] - mid) / (sw / 2)
+        outs.append(float(np.dot(p[f"{s}_wrist"] - p[f"{s}_shoulder"], out)) / sw)
+    return max(outs)
+
+
 def _both(*joints: str) -> tuple[str, ...]:
     return tuple(f"{s}_{j}" for s in ("left", "right") for j in joints)
 
@@ -156,6 +169,7 @@ BODY_FEATURES: dict[str, BodyFeatureDef] = {
     "elbow_angle_both": BodyFeatureDef(_both("shoulder", "elbow", "wrist"), _elbow_angle_both),
     "shoulder_angle_both": BodyFeatureDef(_both("hip", "shoulder", "elbow"), _shoulder_angle_both),
     "hand_ratio": BodyFeatureDef(_both("shoulder", "wrist"), _hand_ratio),
+    "hand_out": BodyFeatureDef(_both("shoulder", "wrist"), _hand_out),
 }
 ALL_FEATURES = {**FEATURES, **BODY_FEATURES}
 

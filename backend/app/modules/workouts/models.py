@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db import Base, UtcDateTime
+from app.db import Base, UtcDateTime, new_uuid
 from app.modules.auth.models import utcnow
 
 
@@ -24,6 +24,7 @@ class WorkoutSession(Base):
     __tablename__ = "workout_sessions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(String(36), unique=True, index=True, default=new_uuid)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     exercise: Mapped[str] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(String(10), default=SessionStatus.ACTIVE.value)

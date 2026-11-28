@@ -18,7 +18,7 @@ def register(body: RegisterRequest, background_tasks: BackgroundTasks, db: Sessi
         user = service.create_user(db, body.email, body.password, body.nickname)
         background_tasks.add_task(
             save_user_to_firestore,
-            user_id=user.id,
+            user_uuid=user.uuid,
             email=user.email,
             nickname=user.nickname,
             created_at=user.created_at.isoformat() if user.created_at else str(user.created_at)

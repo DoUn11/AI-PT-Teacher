@@ -17,6 +17,7 @@ export const FEATURE_META = {
   head_pitch: { label: "고개 숙임", unit: "" },
   head_yaw: { label: "시선 좌우", unit: "" },
   hand_ratio: { label: "손 간격", unit: "" },
+  hand_out: { label: "손 벌어짐", unit: "" },
 };
 
 export const featureLabel = (name) => FEATURE_META[name]?.label ?? name;

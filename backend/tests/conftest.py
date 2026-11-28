@@ -4,7 +4,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import db, models  # noqa: F401
+from tests import fake_firebase
+
+fake_firebase.install()  # app보다 먼저: 테스트는 실제 Firestore를 건드리지 않는다.
+
+from app import db, models  # noqa: E402,F401
 
 
 @pytest.fixture()
@@ -25,6 +29,13 @@ def client(monkeypatch):
 
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture()
+def firestore_docs():
+    """Firestore에 저장된 문서 {경로: 데이터}."""
+    fake_firebase.docs.clear()
+    return fake_firebase.docs
 
 
 def register_and_login(client, email="a@example.com", password="password123", nickname="a"):

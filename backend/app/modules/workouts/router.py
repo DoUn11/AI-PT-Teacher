@@ -270,8 +270,8 @@ def finish_session(
     ]
     background_tasks.add_task(
         save_workout_session_to_firebase,
-        session_id=session.id,
-        user_id=session.user_id,
+        session_uuid=session.uuid,
+        user_uuid=user.uuid,
         exercise=session.exercise,
         status=session.status,
         started_at=session.started_at.isoformat() if session.started_at else str(utcnow()),

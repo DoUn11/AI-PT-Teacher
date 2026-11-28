@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -6,7 +7,7 @@ import pytest
 from aipt_analyzer import Analyzer, ExerciseConfig, load_exercise_config
 from aipt_analyzer.config import available_exercises
 from aipt_analyzer.features import extract_features
-from aipt_analyzer.pose import Pose, angle_deg, vertical_lean_deg
+from aipt_analyzer.pose import KEYPOINT_INDEX, Pose, angle_deg, vertical_lean_deg
 from tests.helpers import cycle, frontal_pose, pushup_pose, run, squat_pose
 
 
@@ -63,6 +64,21 @@ def test_builtin_configs_load():
         assert cfg.calibrated is True and cfg.score_step == 10
         gaze = [c for c in cfg.form_checks if c.code in ("gaze_front", "leg_tension")]
         assert all(not c.enabled for c in gaze)  # 시선, 다리 긴장은 꺼 둔다 (HANDOFF.md 결정)
+    messages = json.loads((Path(__file__).parents[1] / "aipt_analyzer/configs/messages.ko.json").read_text("utf-8"))
+    # 손 위치 검사는 뺐지만, 이미 저장된 기록을 보여 주려고 문구는 남긴다
+    assert "hand_position" in messages
+    assert "hand_position" not in {c.code for c in load_exercise_config("pushup").form_checks}
+
+
+def test_pushup_config_note_matches_calibrate_spec():
+    # calibrate.py로 다시 만들어도 손으로 맞춘 pushup.json과 같은 _note가 나와야 한다
+    # calibrate.py는 pandas가 필요해서 실행하지 않고 EXERCISES 값만 읽는다
+    import ast
+    tree = ast.parse((Path(__file__).parents[1] / "calibration/calibrate.py").read_text("utf-8"))
+    node = next(n for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "EXERCISES")
+    extra = ast.literal_eval(node.value)["pushup"]["note_extra"]
+    note = json.loads((Path(__file__).parents[1] / "aipt_analyzer/configs/pushup.json").read_text("utf-8"))["_note"]
+    assert note.endswith(" " + extra)
 
 
 def _cfg_dict(**overrides):
@@ -174,7 +190,7 @@ def test_start_count_continues_numbering():
 # ---- 푸시업 ---------------------------------------------------------------
 
 
-def test_pushups_counted_and_shallow_ones_penalised_lightly():
+def test_pushups_counted_and_shallow_ones_penalised():
     cfg = load_exercise_config("pushup")
     good = reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 80)]))
     assert len(good) == 1 and good[0].feedback == () and good[0].score == 100
@@ -183,10 +199,33 @@ def test_pushups_counted_and_shallow_ones_penalised_lightly():
     sag = reps_of(run(Analyzer(cfg), [pushup_pose(e, hip_offset=60) for e in cycle(170, 80)]))
     assert len(sag) == 1 and sag[0].feedback == ()
 
-    # 얕은 푸시업도 1회로 세고(count_threshold 140), 약한 조건이라 조금만 깎는다.
+    # 얕은 푸시업도 1회로 세고(count_threshold 145), 목표 125도보다 덜 내려간 1도당 2점 깎는다 (최저 60점).
     # 2초짜리 동작: 1초면 150도 아래에 머무는 시간이 min_rep_seconds(0.6초)보다 짧아 떨림으로 버려진다
+    half = reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 135, frames=60)]))
+    assert len(half) == 1 and half[0].feedback == ("shallow_depth",) and half[0].score == 80
+    deep = reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 124, frames=60)]))
+    assert len(deep) == 1 and deep[0].feedback == () and deep[0].score == 100
     shallow = reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 136, frames=60)]))
-    assert len(shallow) == 1 and shallow[0].feedback == ("shallow_depth",) and shallow[0].score == 90
+    assert len(shallow) == 1 and shallow[0].feedback == ("shallow_depth",) and shallow[0].score == 80
+    barely = reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 143, frames=60)]))
+    assert len(barely) == 1 and barely[0].feedback == ("shallow_depth",) and barely[0].score == 60
+    # 145도까지도 안 내려간 흔들림은 세지 않는다
+    assert reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 148, frames=60)])) == []
+
+
+def test_pushup_wide_hands_flagged():
+    cfg = load_exercise_config("pushup")
+    assert {c.code for c in cfg.form_checks} == {"hand_width", "body_line"}
+    judge = ThresholdJudge(cfg)
+
+    def rep(out):
+        return RepSummary(index=1, start_t=0, end_t=1, primary_feature="elbow_angle", primary_min=80,
+                          stats={"hand_out": {"min": out, "max": out, "mean": out}})
+
+    wide = judge.judge(rep(0.375))
+    assert wide.score == 90 and wide.feedback == ("hand_width",)
+    ok = judge.judge(rep(0.25))
+    assert ok.score == 100 and ok.feedback == ()
 
 
 # ---- 약한 조건 보정 칸 (enabled, live, full_at, stat mean, score_step) ----
@@ -282,11 +321,34 @@ def test_body_features_on_frontal_pose():
     v = extract_features(frontal_pose(-0.9)).values
     expected = {"torso_sw": 2.5, "knee_gap": 0.9, "hip_flex": 177.137595, "knee_lat": 0.0, "ankle_lift": 0.0,
                 "head_pitch": 0.02, "head_yaw": 0.0, "elbow_angle_both": 175.030259,
-                "shoulder_angle_both": 14.172338, "hand_ratio": 1.75}
+                "shoulder_angle_both": 14.172338, "hand_ratio": 1.75, "hand_out": 0.375}
     for k, x in expected.items():
         assert v[k] == pytest.approx(x, abs=1e-5), k
     lifted = extract_features(frontal_pose(0.1)).values
     assert lifted["knee_gap"] == pytest.approx(-0.1) and lifted["ankle_lift"] == pytest.approx(1.0)
+
+
+def _frontal_with(**moves):
+    pose = frontal_pose()
+    xy = pose.xy.copy()
+    for name, pt in moves.items():
+        xy[KEYPOINT_INDEX[name]] = pt
+    return Pose(xy, pose.conf)
+
+
+def test_hand_out_uses_wider_hand_and_is_mirror_safe():
+    # 한쪽 손만 넓음: 오른손은 어깨 바로 아래(0), 왼손은 어깨보다 15px(어깨 폭 40px의 0.375) 바깥
+    one = extract_features(_frontal_with(right_wrist=(80, 195))).values
+    assert one["hand_out"] == pytest.approx(0.375)
+    # 좌우 이름이 바뀌어도(카메라 반전) 같은 값
+    pose = frontal_pose()
+    swap = [KEYPOINT_INDEX[k.replace("left_", "#").replace("right_", "left_").replace("#", "right_")]
+            for k in KEYPOINT_INDEX]
+    mirrored = extract_features(Pose(pose.xy[swap], pose.conf)).values
+    assert mirrored["hand_out"] == pytest.approx(0.375)
+    # 손목이 어깨 안쪽이면 음수
+    narrow = extract_features(_frontal_with(left_wrist=(110, 195), right_wrist=(90, 195))).values
+    assert narrow["hand_out"] == pytest.approx(-0.25)
 
 
 def test_body_features_skip_when_face_not_visible():

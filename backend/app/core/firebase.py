@@ -35,7 +35,7 @@ def _get_client():
 
 
 #Sending the user's info to firebase
-def save_user_to_firestore(user_id:int, email:str,nickname:str,created_at:str):
+def save_user_to_firestore(user_uuid:str, email:str,nickname:str,created_at:str):
     client = _get_client()
     if client is None:
         return
@@ -44,12 +44,12 @@ def save_user_to_firestore(user_id:int, email:str,nickname:str,created_at:str):
         "nickname": nickname,
         "created_at": created_at
     }
-    client.collection("users").document(str(user_id)).set(user_data)
+    client.collection("users").document(user_uuid).set(user_data)
 
 #Sending Workout Session & Rep Records To Firebase
 def save_workout_session_to_firebase(
-    session_id:int,
-    user_id:int,
+    session_uuid:str,
+    user_uuid:str,
     exercise: str,
     status:str,
     started_at:str,
@@ -62,7 +62,7 @@ def save_workout_session_to_firebase(
     if client is None:
         return
     session_data = {
-        "user_id": user_id,
+        "user_id": user_uuid,
         "exercise": exercise,
         "status": status,
         "started_at": started_at,
@@ -70,7 +70,7 @@ def save_workout_session_to_firebase(
         "total_reps": total_reps,
         "avg_score": avg_score
     }
-    session_ref = client.collection("workout_sessions").document(str(session_id))
+    session_ref = client.collection("workout_sessions").document(session_uuid)
     session_ref.set(session_data)
     
     for rep in reps_list:

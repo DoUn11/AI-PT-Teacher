@@ -26,6 +26,7 @@ FEATURE_PARTS: dict[str, tuple[str, ...]] = {
     "elbow_angle_both": ("arms",),
     "shoulder_angle_both": ("arms",),
     "hand_ratio": ("arms",),
+    "hand_out": ("arms",),
 }
 # 같은 특징이라도 조건이 다른 부위를 말하는 경우 (특징보다 우선)
 CODE_PARTS: dict[str, tuple[str, ...]] = {

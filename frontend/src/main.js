@@ -14,7 +14,8 @@ const TABS = ["home", "pi", "dashboard"];
 const DEFAULT_TAB = "home";
 
 async function loadJson(path) {
-  const res = await fetch(path);
+  // 설정·문구 JSON은 주소에 버전이 없어서, 캐시된 옛 문구를 쓰지 않게 매번 서버에 확인한다
+  const res = await fetch(path, { cache: "no-cache" });
   if (!res.ok) throw new Error(`${path} 를 불러오지 못했습니다 (${res.status})`);
   return res.json();
 }
