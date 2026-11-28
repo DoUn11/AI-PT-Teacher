@@ -1,8 +1,8 @@
 // 결과 확인 화면: 운동별 통계, 최근 세션 목록, 세션 상세(rep별 점수·피드백)
 import { AuthError } from "./api.js";
-import { DISPLAY_EXERCISE_LABELS, PLANNED_EXERCISE_LABELS, exerciseLabel, h } from "./dom.js?v=20261127.1";
+import { DISPLAY_EXERCISE_LABELS, PLANNED_EXERCISE_LABELS, exerciseLabel, h } from "./dom.js?v=20261128.2";
 
-import { createExercisePicker } from "./exercise-picker.js?v=20261127.1";
+import { createExercisePicker } from "./exercise-picker.js?v=20261128.2";
 
 const views = new WeakMap();
 const fmtDate = (iso) => new Date(iso).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" });

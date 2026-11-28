@@ -36,6 +36,9 @@ test("config files are valid and identical to the analyzer's copies", () => {
   }
   for (const name of ["squat", "pushup", "kneeup", "sidecrunch"]) validateConfig(load(name));
   const messages = load("messages.ko");
+  // 손 위치 검사는 뺐지만, 이미 저장된 기록을 보여 주려고 문구는 남긴다
+  assert.ok("hand_position" in messages);
+  assert.ok(!load("pushup").form_checks.some((c) => c.code === "hand_position"));
   for (const name of ["pushup", "kneeup", "sidecrunch"]) {
     const cfg = load(name);
     for (const c of cfg.form_checks) assert.ok(c.code in messages, `${name}: no message for ${c.code}`);
@@ -105,7 +108,7 @@ test("start count continues numbering", () => {
   assert.equal(reps[0].summary.index, 5);
 });
 
-test("pushups are counted and shallow ones penalised lightly", () => {
+test("pushups are counted and shallow ones penalised", () => {
   const cfg = load("pushup");
   const good = repsOf(run(new Analyzer(cfg), cycle(170, 80).map((e) => pushupPose(e))));
   assert.equal(good.length, 1);
@@ -116,11 +119,31 @@ test("pushups are counted and shallow ones penalised lightly", () => {
   assert.equal(sag.length, 1);
   assert.deepEqual(sag[0].feedback, []);
 
-  // 얕은 푸시업도 1회로 세고(count_threshold 140), 약한 조건이라 조금만 깎는다.
+  // 얕은 푸시업도 1회로 세고(count_threshold 145), 목표 125도보다 덜 내려간 1도당 2점 깎는다 (최저 60점).
   // 2초짜리 동작: 1초면 150도 아래에 머무는 시간이 min_rep_seconds(0.6초)보다 짧아 떨림으로 버려진다
+  const half = repsOf(run(new Analyzer(cfg), cycle(170, 135, 60).map((e) => pushupPose(e))));
+  assert.equal(half.length, 1);
+  assert.deepEqual([half[0].score, half[0].feedback], [80, ["shallow_depth"]]);
+  const deep = repsOf(run(new Analyzer(cfg), cycle(170, 124, 60).map((e) => pushupPose(e))));
+  assert.equal(deep.length, 1);
+  assert.deepEqual([deep[0].score, deep[0].feedback], [100, []]);
   const shallow = repsOf(run(new Analyzer(cfg), cycle(170, 136, 60).map((e) => pushupPose(e))));
   assert.equal(shallow.length, 1);
-  assert.deepEqual([shallow[0].score, shallow[0].feedback], [90, ["shallow_depth"]]);
+  assert.deepEqual([shallow[0].score, shallow[0].feedback], [80, ["shallow_depth"]]);
+  const barely = repsOf(run(new Analyzer(cfg), cycle(170, 143, 60).map((e) => pushupPose(e))));
+  assert.equal(barely.length, 1);
+  assert.deepEqual([barely[0].score, barely[0].feedback], [60, ["shallow_depth"]]);
+  // 145도까지도 안 내려간 흔들림은 세지 않는다
+  assert.equal(repsOf(run(new Analyzer(cfg), cycle(170, 148, 60).map((e) => pushupPose(e)))).length, 0);
+});
+
+test("pushup wide hands are flagged", () => {
+  const cfg = load("pushup");
+  assert.deepEqual(cfg.form_checks.map((c) => c.code).sort(), ["body_line", "hand_width"]);
+  const judge = new ThresholdJudge(validateConfig(cfg));
+  const rep = (out) => ({ primaryMin: 80, stats: { hand_out: { min: out, max: out, mean: out } } });
+  assert.deepEqual(judge.judge(rep(0.375)), { score: 90, feedback: ["hand_width"] });
+  assert.deepEqual(judge.judge(rep(0.25)), { score: 100, feedback: [] });
 });
 
 // ---- 약한 조건 보정 칸 (enabled, live, full_at, stat mean, score_step) ----
@@ -194,11 +217,32 @@ test("invalid weak-condition fields are rejected", () => {
 test("body features on a frontal pose", () => {
   const v = extractFeatures(frontalPose(-0.9)).values;
   const expected = { torso_sw: 2.5, knee_gap: 0.9, hip_flex: 177.137595, knee_lat: 0, ankle_lift: 0, head_pitch: 0.02,
-    head_yaw: 0, elbow_angle_both: 175.030259, shoulder_angle_both: 14.172338, hand_ratio: 1.75 };
+    head_yaw: 0, elbow_angle_both: 175.030259, shoulder_angle_both: 14.172338, hand_ratio: 1.75, hand_out: 0.375 };
   for (const [k, x] of Object.entries(expected)) near(v[k], x, 1e-5);
   const lifted = extractFeatures(frontalPose(0.1)).values;
   near(lifted.knee_gap, -0.1, 1e-9);
   near(lifted.ankle_lift, 1, 1e-9);
+});
+
+test("hand_out uses the wider hand and is mirror safe", () => {
+  // 한쪽 손만 넓음: 오른손은 어깨 바로 아래(0), 왼손은 어깨보다 15px(어깨 폭 40px의 0.375) 바깥
+  const one = frontalPose();
+  one.xy.right_wrist = [80, 195];
+  near(extractFeatures(one).values.hand_out, 0.375, 1e-9);
+  // 좌우 이름이 바뀌어도(카메라 반전) 같은 값
+  const p = frontalPose();
+  const flip = (k) => k.replace("left_", "#").replace("right_", "left_").replace("#", "right_");
+  const mirrored = { xy: {}, conf: {} };
+  for (const k of Object.keys(p.xy)) {
+    mirrored.xy[flip(k)] = p.xy[k];
+    mirrored.conf[flip(k)] = p.conf[k];
+  }
+  near(extractFeatures(mirrored).values.hand_out, 0.375, 1e-9);
+  // 손목이 어깨 안쪽이면 음수
+  const narrow = frontalPose();
+  narrow.xy.left_wrist = [110, 195];
+  narrow.xy.right_wrist = [90, 195];
+  near(extractFeatures(narrow).values.hand_out, -0.25, 1e-9);
 });
 
 test("body features skip when the face is not visible", () => {

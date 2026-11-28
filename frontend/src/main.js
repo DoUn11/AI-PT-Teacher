@@ -1,9 +1,9 @@
-import "./appearance.js?v=20261127.1";
-import { createExercisePicker } from "./exercise-picker.js?v=20261127.1";
+import "./appearance.js?v=20261128.2";
+import { createExercisePicker } from "./exercise-picker.js?v=20261128.2";
 import { Api, AuthError, DEFAULT_BASE } from "./api.js";
-import { CameraSession } from "./camera.js?v=20261127.1";
-import { loadDashboard } from "./dashboard.js?v=20261127.1";
-import { EXERCISE_LABELS, DISPLAY_EXERCISE_LABELS, PLANNED_EXERCISE_LABELS, exerciseLabel, h } from "./dom.js?v=20261127.1";
+import { CameraSession } from "./camera.js?v=20261128.2";
+import { loadDashboard } from "./dashboard.js?v=20261128.2";
+import { EXERCISE_LABELS, DISPLAY_EXERCISE_LABELS, PLANNED_EXERCISE_LABELS, exerciseLabel, h } from "./dom.js?v=20261128.2";
 
 const $ = (id) => document.getElementById(id);
 const api = new Api(DEFAULT_BASE);
@@ -14,7 +14,8 @@ let registering = false;
 let exercisePicker;
 
 async function loadJson(path) {
-  const res = await fetch(path);
+  // 설정·문구 JSON은 주소에 버전이 없어서, 캐시된 옛 판정 기준을 쓰지 않게 매번 서버에 확인한다
+  const res = await fetch(path, { cache: "no-cache" });
   if (!res.ok) throw new Error(`${path} 를 불러오지 못했습니다 (${res.status})`);
   return res.json();
 }
