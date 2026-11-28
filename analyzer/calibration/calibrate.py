@@ -62,10 +62,11 @@ EXERCISES = {
         "base": {"primary_feature": "elbow_angle", "up_threshold": 150, "count_threshold": 145,
                  "min_rep_seconds": 0.6},
         "depth_from": ("ok_chest", "weak"),  # 가슴 이동(깔짝)은 depth 규칙으로 판정 (목표 각도는 데이터로)
-        # 깔짝 푸시업은 약한 등급(최대 10점)보다 크게 깎는다: 1도당 2점, 최대 40점
-        "depth_override": {"penalty_per_degree": 2.0, "min_score": 60},
+        # 깔짝 푸시업은 약한 등급(최대 10점)보다 크게 깎는다: 1도당 2점, 최저 60점.
+        # 목표 각도는 데이터 값(129.7도)이 웹캠에서 너무 관대해서 100도로 낮췄다 (2026-11-29 사용자 결정)
+        "depth_override": {"target": 100, "penalty_per_degree": 2.0, "min_score": 60},
         # 위 고정값을 _note 끝에 붙인다 (손으로 맞춘 pushup.json과 같게)
-        "note_extra": "2026-11-28: count_threshold, depth 감점, hand_width는 데이터 없이 정한 고정값 (calibrate.py에 같이 반영).",
+        "note_extra": "2026-11-28: count_threshold, depth 목표 각도·감점, hand_width는 데이터 없이 정한 고정값 (calibrate.py에 같이 반영).",
         # 손 위치(ok_hand, 골반-어깨-팔꿈치 각도)는 정면 웹캠에서 안 잡혀서 뺐다.
         # 손 간격(ok_elbow90 라벨 + hand_ratio)은 손을 넓게 짚어도 안 잡혀서 아래 고정 규칙(hand_out)으로 바꿨다.
         "checks": [],

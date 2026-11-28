@@ -119,14 +119,17 @@ test("pushups are counted and shallow ones penalised", () => {
   assert.equal(sag.length, 1);
   assert.deepEqual(sag[0].feedback, []);
 
-  // 얕은 푸시업도 1회로 세고(count_threshold 145), 목표 129.7도보다 덜 내려간 1도당 2점 깎는다 (최대 40점).
+  // 얕은 푸시업도 1회로 세고(count_threshold 145), 목표 100도보다 덜 내려간 1도당 2점 깎는다 (최저 60점).
   // 2초짜리 동작: 1초면 150도 아래에 머무는 시간이 min_rep_seconds(0.6초)보다 짧아 떨림으로 버려진다
+  const half = repsOf(run(new Analyzer(cfg), cycle(170, 110, 60).map((e) => pushupPose(e))));
+  assert.equal(half.length, 1);
+  assert.deepEqual([half[0].score, half[0].feedback], [80, ["shallow_depth"]]);
   const shallow = repsOf(run(new Analyzer(cfg), cycle(170, 136, 60).map((e) => pushupPose(e))));
   assert.equal(shallow.length, 1);
-  assert.deepEqual([shallow[0].score, shallow[0].feedback], [90, ["shallow_depth"]]);
+  assert.deepEqual([shallow[0].score, shallow[0].feedback], [60, ["shallow_depth"]]);
   const barely = repsOf(run(new Analyzer(cfg), cycle(170, 143, 60).map((e) => pushupPose(e))));
   assert.equal(barely.length, 1);
-  assert.deepEqual([barely[0].score, barely[0].feedback], [70, ["shallow_depth"]]);
+  assert.deepEqual([barely[0].score, barely[0].feedback], [60, ["shallow_depth"]]);
   // 145도까지도 안 내려간 흔들림은 세지 않는다
   assert.equal(repsOf(run(new Analyzer(cfg), cycle(170, 148, 60).map((e) => pushupPose(e)))).length, 0);
 });

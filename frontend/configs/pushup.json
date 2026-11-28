@@ -2,7 +2,7 @@
   "exercise": "pushup",
   "version": 2,
   "calibrated": true,
-  "_note": "calibrate.py가 만든 파일 (AI Hub 데이터, MediaPipe lite 1회 단위). 웹캠 실측으로는 아직 검증 안 함. _ba_rep = 하루씩 빼고 검증한 1회 균형정확도. 손으로 고치지 말고 calibrate.py를 고쳐 다시 만든다. 2026-11-28: count_threshold, depth 감점, hand_width는 데이터 없이 정한 고정값 (calibrate.py에 같이 반영).",
+  "_note": "calibrate.py가 만든 파일 (AI Hub 데이터, MediaPipe lite 1회 단위). 웹캠 실측으로는 아직 검증 안 함. _ba_rep = 하루씩 빼고 검증한 1회 균형정확도. 손으로 고치지 말고 calibrate.py를 고쳐 다시 만든다. 2026-11-28: count_threshold, depth 목표 각도·감점, hand_width는 데이터 없이 정한 고정값 (calibrate.py에 같이 반영).",
   "primary_feature": "elbow_angle",
   "up_threshold": 150,
   "count_threshold": 145,
@@ -12,7 +12,7 @@
   "score_step": 10,
   "depth": {
     "code": "shallow_depth",
-    "target": 129.721,
+    "target": 100,
     "tolerance": 0,
     "penalty_per_degree": 2.0,
     "min_score": 60
