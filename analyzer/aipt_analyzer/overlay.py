@@ -12,8 +12,12 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+import math
+
+from aipt_analyzer.config import ExerciseConfig
 from aipt_analyzer.pose import SKELETON_EDGES
 from aipt_analyzer.results import FrameResult, RepResult
+from aipt_analyzer.severity import check_parts, check_severity, code_parts
 
 _FONT_CANDIDATES = (
     "/System/Library/Fonts/AppleSDGothicNeo.ttc",
@@ -30,6 +34,27 @@ RED = (60, 60, 255)
 WHITE = (255, 255, 255)
 YELLOW = (0, 230, 255)
 MIN_DRAW_CONF = 0.3
+
+# 관절을 잇는 선만 그린다 (얼굴 점은 제외). 부위별로 색을 따로 낸다.
+PART_EDGES = {
+    "arms": ((5, 7), (7, 9), (6, 8), (8, 10)),
+    "torso": ((5, 6), (5, 11), (6, 12), (11, 12)),
+    "legs": ((11, 13), (13, 15), (12, 14), (14, 16)),
+}
+_RISE_S, _FALL_S = 0.2, 0.7  # 나빠질 땐 빠르게, 회복할 땐 천천히 색이 변한다
+_FLASH_S = 2.0  # 지적을 받은 반복이 끝난 직후 해당 부위를 잠깐 붉게
+_LIVE_FLAG_MIN = 0.75  # 판정기가 지금 지적한 부위는 최소한 이 정도로 붉게
+
+
+def severity_color(sev: float) -> tuple[int, int, int]:
+    """0(올바름)=초록 -> 0.5=노랑 -> 1(잘못됨)=빨강 (BGR). 값에 따라 연속적으로 변한다."""
+    sev = min(1.0, max(0.0, sev))
+    stops = ((0.0, GREEN), (0.5, (0, 220, 230)), (1.0, (40, 40, 255)))
+    for (a, ca), (b, cb) in zip(stops, stops[1:]):
+        if sev <= b:
+            f = (sev - a) / (b - a)
+            return tuple(int(round(x + (y - x) * f)) for x, y in zip(ca, cb))
+    return stops[-1][1]
 
 
 def find_font() -> str | None:
@@ -81,7 +106,12 @@ class Overlay:
         primary_feature: str,
         font_path: str | None = None,
         flash_seconds: float = 3.0,
+        cfg: ExerciseConfig | None = None,
     ) -> None:
+        self._cfg = cfg  # 있으면 잘못된 부위를 판정 기준에 맞춰 점점 붉게 칠한다
+        self._sev = {part: 0.0 for part in PART_EDGES}
+        self._flash_until = {part: 0.0 for part in PART_EDGES}
+        self._last_now: float | None = None
         self._exercise = exercise
         self._messages = messages
         self._primary = primary_feature
@@ -92,8 +122,13 @@ class Overlay:
     def _msg(self, code: str) -> tuple[str, str]:
         return self._messages.get(code, code), code  # 문구가 없으면 코드를 그대로 보여준다
 
-    def render(self, frame: np.ndarray, result: FrameResult, now: float) -> np.ndarray:
+    def render(self, frame: np.ndarray, result: FrameResult, now: float, text: bool = True) -> np.ndarray:
+        """text=False면 글자·HUD 없이 관절선만 그린다 (정보는 백엔드로 따로 보내 웹에서 보여 줄 때)."""
         out = frame.copy()
+        self._update_severity(result, now)
+        if not text:
+            self._draw_skeleton(out, result)
+            return out
         h, w = out.shape[:2]
         text = _TextLayer(self._font_path, max(14, h // 24))
         line = text._size + 6
@@ -129,19 +164,68 @@ class Overlay:
 
         return text.apply(out)
 
+    def _targets(self, result: FrameResult, now: float) -> dict[str, float]:
+        """부위별로 '지금 얼마나 잘못됐는가'(0~1). 판정 설정이 없으면 지적이 있을 때 전체를 붉게.
+
+        실시간(live) 조건은 지금 값으로 점점 붉게, 반복이 끝난 뒤에만 판정하는 조건(live=False)과
+        깊이 부족은 반복이 끝난 직후 해당 부위를 잠깐 붉게 한다. 꺼 둔(enabled=False) 조건은 무시한다.
+        """
+        target = {part: 0.0 for part in PART_EDGES}
+        cfg = self._cfg
+        if cfg is None:
+            if result.live_feedback:
+                target = {part: 1.0 for part in PART_EDGES}
+            return target
+
+        def raise_to(parts, value):
+            for part in parts:
+                target[part] = max(target[part], value)
+
+        if result.visible:
+            flagged = set(result.live_feedback)
+            for check in cfg.form_checks:
+                if not (check.enabled and check.live):
+                    continue
+                value = result.features.get(check.feature)
+                if value is not None:
+                    raise_to(check_parts(check), check_severity(check, value))
+                if check.code in flagged:
+                    raise_to(check_parts(check), _LIVE_FLAG_MIN)
+
+        if result.rep is not None:
+            for code in result.rep.feedback:
+                for part in code_parts(code, cfg):
+                    self._flash_until[part] = now + _FLASH_S
+        for part, until in self._flash_until.items():
+            if now <= until:
+                target[part] = 1.0
+        return target
+
+    def _update_severity(self, result: FrameResult, now: float) -> None:
+        dt = 0.0 if self._last_now is None else max(0.0, now - self._last_now)
+        self._last_now = now
+        for part, goal in self._targets(result, now).items():
+            cur = self._sev[part]
+            tau = _RISE_S if goal > cur else _FALL_S
+            self._sev[part] = cur + (goal - cur) * (1 - math.exp(-dt / tau))
+
     def _draw_skeleton(self, out: np.ndarray, result: FrameResult) -> None:
         pose = result.pose
         if pose is None:
             return
-        color = RED if result.live_feedback else GREEN
-        for a, b in SKELETON_EDGES:
-            if pose.conf[a] >= MIN_DRAW_CONF and pose.conf[b] >= MIN_DRAW_CONF:
-                pa = tuple(int(v) for v in pose.xy[a])
-                pb = tuple(int(v) for v in pose.xy[b])
-                cv2.line(out, pa, pb, color, 3, cv2.LINE_AA)
-        for i in range(17):
-            if pose.conf[i] >= MIN_DRAW_CONF:
-                cv2.circle(out, tuple(int(v) for v in pose.xy[i]), 5, WHITE, -1, cv2.LINE_AA)
+        node_sev: dict[int, float] = {}
+        for part, edges in PART_EDGES.items():
+            sev = self._sev[part]
+            color = severity_color(sev)
+            for a, b in edges:
+                if pose.conf[a] >= MIN_DRAW_CONF and pose.conf[b] >= MIN_DRAW_CONF:
+                    pa = tuple(int(v) for v in pose.xy[a])
+                    pb = tuple(int(v) for v in pose.xy[b])
+                    cv2.line(out, pa, pb, color, 4, cv2.LINE_AA)
+                    for n in (a, b):
+                        node_sev[n] = max(node_sev.get(n, 0.0), sev)
+        for n, sev in node_sev.items():
+            cv2.circle(out, tuple(int(v) for v in pose.xy[n]), 5, severity_color(sev), -1, cv2.LINE_AA)
 
     def _draw_hud(self, out: np.ndarray, text: _TextLayer, result: FrameResult, line: int) -> None:
         panel_w, panel_h = int(text._size * 11), line * 3 + 12

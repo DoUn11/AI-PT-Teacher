@@ -1,4 +1,5 @@
 """테스트가 팀 Firestore에 접속하지 않도록 firebase_admin을 대신하는 메모리 구현."""
+import os
 import sys
 from types import ModuleType
 
@@ -20,6 +21,8 @@ class _Ref:
 
 
 def install() -> None:
+    # 서비스 계정 키 파일이 없어도 동기화가 켜지게 한다 (키 내용은 가짜 Certificate가 읽지 않는다)
+    os.environ["FIREBASE_CREDENTIALS"] = __file__
     package = ModuleType("firebase_admin")
     package._apps = {}
     package.initialize_app = lambda *args, **kwargs: None

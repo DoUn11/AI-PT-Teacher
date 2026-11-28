@@ -81,4 +81,17 @@ export class Api {
   sessions(limit = 20) { return this.request("GET", `/workouts/sessions?limit=${limit}`); }
   session(id) { return this.request("GET", `/workouts/sessions/${id}`); }
   stats() { return this.request("GET", "/workouts/stats"); }
+  report(id) { return this.request("GET", `/workouts/sessions/${id}/report`); }
+  // 날짜 경계(연속 운동일, 주간 막대)를 사용자의 하루로 세도록 시간대를 함께 보낸다 (UTC에서 동쪽으로 몇 분)
+  insights() { return this.request("GET", `/workouts/insights?tz_offset=${-new Date().getTimezoneOffset()}`); }
+  // plan = {sets, reps, rest_seconds}. 없으면 목표 없이 자유롭게
+  startWorkout(exercise, plan = null) { return this.request("POST", "/camera/session/start", { exercise, ...(plan ?? {}) }); }
+  skipRest() { return this.request("POST", "/camera/session/skip-rest"); }
+  plans() { return this.request("GET", "/workouts/plans"); }
+  savePlan(exercise, plan) { return this.request("PUT", `/workouts/plans/${exercise}`, plan); }
+  stopWorkout() { return this.request("POST", "/camera/session/stop"); }
+  cameraStatus() { return this.request("GET", "/camera/status"); }
+  setCameraExercise(exercise) { return this.request("POST", "/camera/exercise", { exercise }); }
+  cameraAnalysis() { return this.request("GET", "/camera/analysis"); }
+  cameraEvents(limit = 10) { return this.request("GET", `/camera/events?limit=${limit}`); }
 }

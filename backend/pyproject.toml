@@ -19,6 +19,9 @@ dev = [
     "httpx>=0.27",
 ]
 # 운영 DB(PostgreSQL)를 쓸 때만 설치
+firebase = ["firebase-admin>=6.5"]
+# Pi 카메라를 MQTT로 받을 때 (MQTT_URL 설정)
+mqtt = ["paho-mqtt>=2.0"]
 postgres = ["psycopg[binary]>=3.2"]
 
 [tool.pytest.ini_options]

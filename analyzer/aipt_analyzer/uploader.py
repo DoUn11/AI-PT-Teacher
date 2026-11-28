@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 
 import httpx
 
+from aipt_analyzer.config import ExerciseConfig
 from aipt_analyzer.results import RepResult
+from aipt_analyzer.severity import rep_parts
 
 log = logging.getLogger("aipt.upload")
 
@@ -38,6 +40,8 @@ class BackendClient:
         self._lock = threading.Lock()
         self._pending: list[dict] = []
         self.session_id: int | None = None
+        self.cfg: ExerciseConfig | None = None  # 있으면 반복마다 부위별 약점(parts)도 함께 올린다
+        self.last_finished: dict | None = None  # 마지막으로 종료한 세션 (id, total_reps, avg_score ...)
 
     def login(self) -> None:
         r = self._http.post(f"{self._api}/auth/login", json={"email": self._email, "password": self._password})
@@ -58,24 +62,33 @@ class BackendClient:
             return r
         return r  # pragma: no cover
 
-    def start_session(self, exercise: str) -> int:
-        r = self._request("POST", "/workouts/sessions", json={"exercise": exercise})
+    def start_session(self, exercise: str, cfg: ExerciseConfig | None = None, plan=None) -> int:
+        """plan(sets, reps, rest_seconds)이 있으면 세션의 목표로 함께 기록한다 (진행도와 다음 목표 계산에 쓰인다)."""
+        self.cfg = cfg
+        self.last_finished = None
+        body = {"exercise": exercise}
+        if plan is not None:
+            body.update(target_sets=plan.sets, target_reps=plan.reps, rest_seconds=plan.rest_seconds)
+        r = self._request("POST", "/workouts/sessions", json=body)
         r.raise_for_status()
         self.session_id = r.json()["id"]
+        with self._lock:
+            self._pending = []  # 운동을 바꿔 새 세션을 열면 이전 운동의 못 보낸 rep이 섞이지 않게 한다
         return self.session_id
 
     def enqueue(self, rep: RepResult, completed_at: datetime | None = None) -> None:
         when = completed_at or datetime.now(timezone.utc)
+        item = {
+            "index": rep.summary.index,
+            "score": rep.score,
+            "min_angle": round(min(max(rep.summary.primary_min, 0.0), 180.0), 2),
+            "feedback": list(rep.feedback)[:10],
+            "completed_at": when.isoformat(),
+        }
+        if self.cfg is not None:
+            item["parts"] = rep_parts(self.cfg, rep.summary, rep.feedback)
         with self._lock:
-            self._pending.append(
-                {
-                    "index": rep.summary.index,
-                    "score": rep.score,
-                    "min_angle": round(min(max(rep.summary.primary_min, 0.0), 180.0), 2),
-                    "feedback": list(rep.feedback)[:10],
-                    "completed_at": when.isoformat(),
-                }
-            )
+            self._pending.append(item)
 
     def flush(self) -> bool:
         """대기 중인 rep을 한 번에 보낸다. 모두 처리됐으면(또는 버려졌으면) True."""
@@ -107,7 +120,13 @@ class BackendClient:
         except httpx.HTTPError as e:
             log.warning("세션 종료 요청 실패: %s", e)
             return False
-        return r.status_code < 400
+        if r.status_code >= 400:
+            return False
+        try:
+            self.last_finished = r.json()
+        except ValueError:
+            self.last_finished = {"id": self.session_id}
+        return True
 
     @property
     def pending_count(self) -> int:

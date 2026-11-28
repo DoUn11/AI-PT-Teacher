@@ -4,7 +4,7 @@ Pi 카메라 영상을 PC에서 받아 **자세를 분석하고 영상 위에 �
 백엔드로 올리고, 학습용 데이터는 파일로 남긴다.
 
 ```
-Pi (H.264 TCP:8888) → LiveSource → PoseEstimator(YOLO) → Analyzer → Overlay(영상 위 표시)
+Pi (H.264 TCP:8888 또는 MQTT JPEG) → LiveSource / MqttSource → PoseEstimator(YOLO) → Analyzer → Overlay(영상 위 표시)
                                                            │  ├→ SessionRecorder (학습 데이터)
                                                            │  └→ UploadWorker → 백엔드
                                                   features → counter → judge
@@ -25,6 +25,9 @@ export AIPT_EMAIL=me@example.com AIPT_PASSWORD=...             # 없으면 실�
 --no-upload            백엔드 없이 화면 표시만
 --record recordings    학습용 데이터 기록
 --source 0             웹캠 / 영상 파일 경로도 가능
+--source mqtt://<브로커>:1883/<토픽>   Pi가 MQTT로 보내는 JPEG 프레임 (pip install -e ".[mqtt]")
+--publish mqtt://<브로커>:1883/<토픽>       관절선만 그린 분석 화면을 웹용으로 내보내기 (글자 없음)
+--publish-info mqtt://<브로커>:1883/<토픽>  횟수·자세 조건 판정 같은 분석 정보를 JSON으로 내보내기
 --thresholds my.json   보정·학습된 설정으로 교체
 --no-show --seconds 60 창 없이 60초만
 ```
@@ -130,3 +133,26 @@ aipt_analyzer/
 - 한 명(화면에서 가장 큰 사람)만 분석한다. 푸시업 같은 수평 자세에서 키포인트가 흔들릴 수 있어 실측 보정이 필요하다.
 - 한 세션 안에서 카메라 쪽 몸이 바뀌면(몸을 돌리면) 특징이 불연속할 수 있다.
 - 화면에서 사람이 오래(1초 이상) 사라지면 스무딩 이력은 버리지만, 진행 중이던 rep 상태는 유지한다.
+
+## 웹에 분석 화면 보여 주기
+
+로컬 창과 별개로, 웹 "Pi 카메라" 탭이 분석 결과를 보여 줄 수 있다. 영상에는 **글자를 쓰지 않고**(관절 부위만 선으로 잇는다),
+글자 정보는 JSON으로 따로 보내 웹이 영상 아래에 그린다.
+
+- **관절선 색:** 올바른 부위는 초록, 기준에 다가갈수록 노랑을 거쳐 빨강으로 서서히 변한다. 실시간(`live`) 조건은 지금 값으로,
+  반복이 끝난 뒤에만 판정하는 조건(`live: false`)과 깊이 부족은 반복 직후 해당 부위를 잠깐 붉게 한다. `enabled: false` 조건은 무시한다.
+  어느 조건이 어느 부위(팔/상체/다리)인지는 `severity.py`에 있고, 오버레이와 웹 패널이 같은 기준(`check_severity`)을 쓴다.
+- **분석 정보 JSON(`publisher.py`):** 조건별 판정(`checks`), 주 특징 값과 기준선, 횟수, 마지막 반복, 점수 이력. 비율 특징도 있어서 값은 소수 3자리까지 보낸다.
+- 새 특징이나 조건을 추가하면 `severity.py`의 `FEATURE_PARTS`(부위)와 프런트 `analysis-view.js`의 `FEATURE_META`(이름/단위)에 한 줄씩 넣는다.
+  모르는 특징은 이름 그대로, 비율처럼 표시된다.
+
+## 웹에서 운동 시작/종료 (세션)
+
+`--control`을 켜면(`run_mqtt.sh`는 항상 켠다) 분석기는 **준비 상태**로 시작한다. 자세 표시와 관절선은 돌지만 횟수는 세지 않고 백엔드에도 올리지 않는다.
+웹의 **운동 시작**을 누르면(`{"action":"start","exercise":"..."}`) 백엔드에 세션을 열고 0회부터 세며(`station.py`), **운동 종료**(`{"action":"stop"}`)를 누르면 남은 반복을 올리고
+세션을 닫은 뒤 방금 끝난 세션의 id를 분석 정보(`session.last`)로 알린다. 웹은 그 id의 리포트로 이동한다. `--control` 없이 쓰면 예전처럼 켜자마자 세션이 열리고 종료할 때 닫힌다.
+
+- 시작에 `plan`(`{sets, reps, rest_seconds}`)이 있으면 세트를 진행한다: 5초 준비 → 세트 → 휴식 → … → 마지막 세트를 채우면 저절로 종료. 쉬거나 준비하는 동안은 횟수를 세지 않고 올리지도 않는다. `{"action":"skip_rest"}`로 건너뛴다. 운동 중에는 `select`/`start`를 무시한다.
+- 반복마다 `parts`(팔·몸통·다리 약점, 0~1)를 함께 올린다. 판정기가 지적한 항목만 보고 계산한다(`severity.rep_parts`).
+- 분석 정보 JSON은 `v: 3`부터 `session: {state: idle|active, id, started_at, last}`를, `v: 4`부터 `session.progress`(세트 번호, 세트 내 횟수, 상태 ready|working|resting, 남은 초)를 싣는다.
+- 전체 흐름과 화면은 [../docs/USECASES.md](../docs/USECASES.md).
