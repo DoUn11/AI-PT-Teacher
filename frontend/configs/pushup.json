@@ -12,7 +12,7 @@
   "score_step": 10,
   "depth": {
     "code": "shallow_depth",
-    "target": 100,
+    "target": 125,
     "tolerance": 0,
     "penalty_per_degree": 2.0,
     "min_score": 60
