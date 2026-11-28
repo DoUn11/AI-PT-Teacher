@@ -1,4 +1,4 @@
-import { h } from "./dom.js?v=20261128.1";
+import { h } from "./dom.js?v=20261128.2";
 
 export function createExercisePicker(choices, settings = {}) {
   const events = new AbortController();
