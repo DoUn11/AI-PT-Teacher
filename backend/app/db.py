@@ -1,7 +1,8 @@
+import uuid
 from collections.abc import Iterator
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, create_engine
+from sqlalchemy import DateTime, Engine, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
 
@@ -35,6 +36,29 @@ class UtcDateTime(TypeDecorator):
 
 class Base(DeclarativeBase):
     pass
+
+
+def new_uuid() -> str:
+    """PC마다 따로 매겨지는 정수 ID 대신 Firestore 문서 이름으로 쓰는 값."""
+    return str(uuid.uuid4())
+
+
+def add_missing_uuids(engine: Engine) -> None:
+    """uuid 컬럼이 없던 기존 DB에 컬럼을 추가하고 빈 값을 채운다 (여러 번 실행해도 안전).
+
+    create_all은 이미 있는 테이블을 바꾸지 않아서 필요하다. Alembic 도입 시 대체한다.
+    """
+    with engine.begin() as conn:
+        for table in ("users", "workout_sessions"):
+            if "uuid" not in {column["name"] for column in inspect(conn).get_columns(table)}:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN uuid VARCHAR(36)"))
+                conn.execute(text(f"CREATE UNIQUE INDEX ix_{table}_uuid ON {table} (uuid)"))
+            missing = conn.execute(text(f"SELECT id FROM {table} WHERE uuid IS NULL")).scalars()
+            for row_id in missing.all():
+                conn.execute(
+                    text(f"UPDATE {table} SET uuid = :uuid WHERE id = :id"),
+                    {"uuid": new_uuid(), "id": row_id},
+                )
 
 
 def make_engine(url: str):
