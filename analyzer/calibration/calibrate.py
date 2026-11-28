@@ -58,15 +58,20 @@ EXERCISES = {
     },
     "pushup": {
         "csv": "pushup_A.csv",
-        "base": {"primary_feature": "elbow_angle", "up_threshold": 150, "count_threshold": 140,
+        # count 145: 살짝만 내려간 깔짝 푸시업도 1회로 세고 shallow_depth로 감점한다 (2026-11-28 웹캠 테스트 후 결정)
+        "base": {"primary_feature": "elbow_angle", "up_threshold": 150, "count_threshold": 145,
                  "min_rep_seconds": 0.6},
-        "depth_from": ("ok_chest", "weak"),  # 가슴 이동(깔짝)은 depth 규칙으로 판정
-        "checks": [
-            ("hand_width", "ok_elbow90", "hand_ratio", "mean", "medium", True),
-            ("hand_position", "ok_hand", "shoulder_angle_both", "min", "weak", True),
-        ],
+        "depth_from": ("ok_chest", "weak"),  # 가슴 이동(깔짝)은 depth 규칙으로 판정 (목표 각도는 데이터로)
+        # 깔짝 푸시업은 약한 등급(최대 10점)보다 크게 깎는다: 1도당 2점, 최대 40점
+        "depth_override": {"penalty_per_degree": 2.0, "min_score": 60},
+        # 손 위치(ok_hand, 골반-어깨-팔꿈치 각도)는 정면 웹캠에서 안 잡혀서 뺐다.
+        # 손 간격(ok_elbow90 라벨 + hand_ratio)은 손을 넓게 짚어도 안 잡혀서 아래 고정 규칙(hand_out)으로 바꿨다.
+        "checks": [],
         # 데이터로 정하지 않는 고정 조건. 푸시업 척추(몸 일직선)는 정면 카메라로는 판정하지 않기로 해서 꺼 둔다.
         "fixed_checks": [
+            {"code": "hand_width", "feature": "hand_out", "stat": "mean", "limit": 0.25, "direction": "above",
+             "full_at": 0.5, "penalty": 20, "tier": "medium", "live": True, "enabled": True,
+             "_note": "어깨-손목 위치 고정 규칙 (데이터 라벨 없음). 웹캠으로 조정"},
             {"code": "body_line", "feature": "body_line", "stat": "min", "limit": 155, "penalty": 20,
              "enabled": False, "_note": "측면 촬영용 초기값. 정면 카메라에서는 끔 (HANDOFF.md)"},
         ],
@@ -138,6 +143,7 @@ def build(ex: str, spec: dict, reps: Path) -> tuple[dict, list[str]]:
         depth = {"code": "shallow_depth", "target": t, "tolerance": 0,
                  "penalty_per_degree": round(TIER[tier]["penalty"] / (fa - t), 3),
                  "min_score": 100 - TIER[tier]["penalty"]}
+        depth.update(spec.get("depth_override", {}))
         report.append(f"| {ex} | shallow_depth (depth) | elbow_angle min > {t} | {fa} | {tier} | 켬 | {lodo_ba(x, y, days):.2f} |")
 
     cfg = {"exercise": ex, "version": 2, "calibrated": True,

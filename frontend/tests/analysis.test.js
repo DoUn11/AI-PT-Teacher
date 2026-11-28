@@ -36,6 +36,7 @@ test("config files are valid and identical to the analyzer's copies", () => {
   }
   for (const name of ["squat", "pushup", "kneeup", "sidecrunch"]) validateConfig(load(name));
   const messages = load("messages.ko");
+  assert.ok(!("hand_position" in messages));
   for (const name of ["pushup", "kneeup", "sidecrunch"]) {
     const cfg = load(name);
     for (const c of cfg.form_checks) assert.ok(c.code in messages, `${name}: no message for ${c.code}`);
@@ -105,7 +106,7 @@ test("start count continues numbering", () => {
   assert.equal(reps[0].summary.index, 5);
 });
 
-test("pushups are counted and shallow ones penalised lightly", () => {
+test("pushups are counted and shallow ones penalised", () => {
   const cfg = load("pushup");
   const good = repsOf(run(new Analyzer(cfg), cycle(170, 80).map((e) => pushupPose(e))));
   assert.equal(good.length, 1);
@@ -116,11 +117,25 @@ test("pushups are counted and shallow ones penalised lightly", () => {
   assert.equal(sag.length, 1);
   assert.deepEqual(sag[0].feedback, []);
 
-  // 얕은 푸시업도 1회로 세고(count_threshold 140), 약한 조건이라 조금만 깎는다.
+  // 얕은 푸시업도 1회로 세고(count_threshold 145), 목표 129.7도보다 덜 내려간 1도당 2점 깎는다 (최대 40점).
   // 2초짜리 동작: 1초면 150도 아래에 머무는 시간이 min_rep_seconds(0.6초)보다 짧아 떨림으로 버려진다
   const shallow = repsOf(run(new Analyzer(cfg), cycle(170, 136, 60).map((e) => pushupPose(e))));
   assert.equal(shallow.length, 1);
   assert.deepEqual([shallow[0].score, shallow[0].feedback], [90, ["shallow_depth"]]);
+  const barely = repsOf(run(new Analyzer(cfg), cycle(170, 143, 60).map((e) => pushupPose(e))));
+  assert.equal(barely.length, 1);
+  assert.deepEqual([barely[0].score, barely[0].feedback], [70, ["shallow_depth"]]);
+  // 145도까지도 안 내려간 흔들림은 세지 않는다
+  assert.equal(repsOf(run(new Analyzer(cfg), cycle(170, 148, 60).map((e) => pushupPose(e)))).length, 0);
+});
+
+test("pushup wide hands are flagged", () => {
+  const cfg = load("pushup");
+  assert.deepEqual(cfg.form_checks.map((c) => c.code).sort(), ["body_line", "hand_width"]);
+  const judge = new ThresholdJudge(validateConfig(cfg));
+  const rep = (out) => ({ primaryMin: 80, stats: { hand_out: { min: out, max: out, mean: out } } });
+  assert.deepEqual(judge.judge(rep(0.375)), { score: 90, feedback: ["hand_width"] });
+  assert.deepEqual(judge.judge(rep(0.25)), { score: 100, feedback: [] });
 });
 
 // ---- 약한 조건 보정 칸 (enabled, live, full_at, stat mean, score_step) ----

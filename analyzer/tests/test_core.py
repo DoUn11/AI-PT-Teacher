@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -63,6 +64,8 @@ def test_builtin_configs_load():
         assert cfg.calibrated is True and cfg.score_step == 10
         gaze = [c for c in cfg.form_checks if c.code in ("gaze_front", "leg_tension")]
         assert all(not c.enabled for c in gaze)  # 시선, 다리 긴장은 꺼 둔다 (HANDOFF.md 결정)
+    messages = json.loads((Path(__file__).parents[1] / "aipt_analyzer/configs/messages.ko.json").read_text("utf-8"))
+    assert "hand_position" not in messages
 
 
 def _cfg_dict(**overrides):
@@ -174,7 +177,7 @@ def test_start_count_continues_numbering():
 # ---- 푸시업 ---------------------------------------------------------------
 
 
-def test_pushups_counted_and_shallow_ones_penalised_lightly():
+def test_pushups_counted_and_shallow_ones_penalised():
     cfg = load_exercise_config("pushup")
     good = reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 80)]))
     assert len(good) == 1 and good[0].feedback == () and good[0].score == 100
@@ -183,10 +186,29 @@ def test_pushups_counted_and_shallow_ones_penalised_lightly():
     sag = reps_of(run(Analyzer(cfg), [pushup_pose(e, hip_offset=60) for e in cycle(170, 80)]))
     assert len(sag) == 1 and sag[0].feedback == ()
 
-    # 얕은 푸시업도 1회로 세고(count_threshold 140), 약한 조건이라 조금만 깎는다.
+    # 얕은 푸시업도 1회로 세고(count_threshold 145), 목표 129.7도보다 덜 내려간 1도당 2점 깎는다 (최대 40점).
     # 2초짜리 동작: 1초면 150도 아래에 머무는 시간이 min_rep_seconds(0.6초)보다 짧아 떨림으로 버려진다
     shallow = reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 136, frames=60)]))
     assert len(shallow) == 1 and shallow[0].feedback == ("shallow_depth",) and shallow[0].score == 90
+    barely = reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 143, frames=60)]))
+    assert len(barely) == 1 and barely[0].feedback == ("shallow_depth",) and barely[0].score == 70
+    # 145도까지도 안 내려간 흔들림은 세지 않는다
+    assert reps_of(run(Analyzer(cfg), [pushup_pose(e) for e in cycle(170, 148, frames=60)])) == []
+
+
+def test_pushup_wide_hands_flagged():
+    cfg = load_exercise_config("pushup")
+    assert {c.code for c in cfg.form_checks} == {"hand_width", "body_line"}
+    judge = ThresholdJudge(cfg)
+
+    def rep(out):
+        return RepSummary(index=1, start_t=0, end_t=1, primary_feature="elbow_angle", primary_min=80,
+                          stats={"hand_out": {"min": out, "max": out, "mean": out}})
+
+    wide = judge.judge(rep(0.375))
+    assert wide.score == 90 and wide.feedback == ("hand_width",)
+    ok = judge.judge(rep(0.25))
+    assert ok.score == 100 and ok.feedback == ()
 
 
 # ---- 약한 조건 보정 칸 (enabled, live, full_at, stat mean, score_step) ----

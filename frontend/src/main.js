@@ -1,9 +1,9 @@
-import "./appearance.js?v=20261127.1";
-import { createExercisePicker } from "./exercise-picker.js?v=20261127.1";
+import "./appearance.js?v=20261128.1";
+import { createExercisePicker } from "./exercise-picker.js?v=20261128.1";
 import { Api, AuthError, DEFAULT_BASE } from "./api.js";
-import { CameraSession } from "./camera.js?v=20261127.1";
-import { loadDashboard } from "./dashboard.js?v=20261127.1";
-import { EXERCISE_LABELS, DISPLAY_EXERCISE_LABELS, PLANNED_EXERCISE_LABELS, exerciseLabel, h } from "./dom.js?v=20261127.1";
+import { CameraSession } from "./camera.js?v=20261128.1";
+import { loadDashboard } from "./dashboard.js?v=20261128.1";
+import { EXERCISE_LABELS, DISPLAY_EXERCISE_LABELS, PLANNED_EXERCISE_LABELS, exerciseLabel, h } from "./dom.js?v=20261128.1";
 
 const $ = (id) => document.getElementById(id);
 const api = new Api(DEFAULT_BASE);
