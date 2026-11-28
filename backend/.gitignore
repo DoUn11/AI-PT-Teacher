@@ -5,3 +5,7 @@ __pycache__/
 *.db
 .env
 *.egg-info/
+# Firebase 서비스 계정 키 (비밀 정보, 커밋 금지)
+serviceAccountkey.json
+serviceAccountKey.json
+*firebase-adminsdk*.json
