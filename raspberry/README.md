@@ -73,6 +73,64 @@ ok, frame = cap.read()
 
 ---
 
+## MQTT로 보내기 (대안)
+
+H.264 TCP 스트림 대신 프레임을 JPEG로 인코딩해 MQTT 토픽으로 발행한다. 브로커를 거치므로
+여러 수신자가 같은 영상을 받을 수 있고, 수신 측이 먼저 떠 있지 않아도 된다.
+대신 프레임마다 JPEG을 따로 담아 H.264보다 대역폭이 크고, 브로커를 한 번 더 거친다. 지연은 아직 측정하지 않았다. 실시간 피드백은 측정된 위 TCP 방식을 권장한다.
+
+```
+Camera Module 3 ─> Pi (pi_mqtt_publisher.py, JPEG) ─MQTT─> 브로커(PC) ─> analyzer (mqtt://...)
+```
+
+```bash
+# 브로커 (수신 PC에 설치. macOS)
+brew install mosquitto
+mosquitto -c raspberry/mosquitto.conf       # 터미널을 열어 둔 동안 동작 (인증 없음: 신뢰하는 네트워크 전용)
+# 처음 실행하면 macOS가 "들어오는 연결 허용"을 물으니 허용
+
+# 송출 (Pi) — <PC IP>는 Pi가 접속할 수 있는 PC 주소
+pip install paho-mqtt
+python pi_mqtt_publisher.py --host <PC IP> --topic aipt/camera/frame
+```
+
+```bash
+# 수신 (PC) — analyzer. 브로커가 같은 PC이므로 localhost
+python -m aipt_analyzer --exercise pushup --source mqtt://localhost:1883/ai_pt/cam/frame
+```
+
+**Pi와 PC는 서로 접속 가능한 같은 네트워크에 있어야 한다.** 같은 공유기이거나, 둘 다 Tailscale에 로그인한 상태(PC의 Tailscale 주소 사용).
+브로커를 Pi에 두려면 Pi에서 `sudo apt install mosquitto`, 같은 설정(`listener 1883`, `allow_anonymous true`)을 적용하고 Pi 방화벽에서 1883을 열면 된다. 이때 송신은 `--host localhost`, 수신은 `mqtt://<Pi IP>:1883/...`.
+
+| 항목 | 내용 |
+|---|---|
+| 토픽 | 기본 `aipt/camera/frame`. 페이로드는 JPEG 바이트 그대로 |
+| QoS | 0. 느리면 프레임을 버려 지연이 쌓이지 않게 함 (Pi는 못 보낸 프레임을 건너뜀) |
+| 재연결 | 브로커가 끊기거나 늦게 떠도 양쪽이 자동으로 다시 연결 |
+| 인증 | 환경변수 `MQTT_USERNAME`, `MQTT_PASSWORD` (양쪽 공통). TLS는 Pi `--tls`, PC `mqtts://` |
+| 방화벽 | 브로커 쪽에서 1883 허용 (Pi는 `sudo ufw allow from 192.168.1.0/24 to any port 1883 proto tcp`) |
+
+## Pi 전원만 켜면 자동 실행 (systemd)
+
+Pi에서 **한 번만** 설치하면, 이후에는 전원을 꽂기만 해도 부팅 후 송신이 자동으로 시작된다. 카메라가 일시적으로 실패하거나
+프로그램이 죽어도 5초 뒤 다시 시작하고, 브로커(PC)가 아직 안 떠 있어도 계속 재접속한다.
+
+```bash
+# PC에서: 두 파일을 Pi로 복사
+scp raspberry/pi_mqtt_publisher.py raspberry/install_service.sh ai-pt@AIPT.local:~/
+
+# Pi에서 (ssh ai-pt@AIPT.local 로 접속한 뒤)
+sudo ./install_service.sh dounui-MacBookAir.local      # 브로커가 있는 PC 이름(또는 IP)
+journalctl -u aipt-camera -f                          # mqtt connected / sent=... 가 보이면 정상
+```
+
+- **PC 주소는 이름(`<PC이름>.local`)으로 넣는 것을 권장한다.** IP는 네트워크(공유기, 핫스팟)마다 바뀌지만 이름은 그대로다. PC 이름은 `scutil --get LocalHostName`으로 확인한다.
+- 주소를 바꾸려면 `sudo nano /etc/aipt-camera.env` 후 `sudo systemctl restart aipt-camera`. 끄려면 `sudo systemctl disable --now aipt-camera`.
+- 기존 H.264 송출 스크립트(`pi_rpicam_stream.sh` 등)를 자동 실행하도록 해 두었다면 **끄거나 서비스를 하나만** 남긴다. 카메라는 한 프로그램만 쓸 수 있다.
+- Pi만 자동으로 켜진다. PC에서는 `./run_mqtt.sh`(브로커와 분석기)를 켜 두어야 영상이 들어온다.
+
+---
+
 ## 측정 결과
 
 ### 같은 공유기 vs 인터넷

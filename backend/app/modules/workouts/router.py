@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from sqlalchemy import func, select
@@ -8,6 +8,7 @@ from app.core.firebase import save_workout_session_to_firebase
 from app.db import get_db
 from app.modules.auth.deps import get_current_user
 from app.modules.auth.models import User, utcnow
+from app.modules.workouts import insights
 from app.modules.workouts.models import (
     Exercise,
     RepRecord,
@@ -16,6 +17,8 @@ from app.modules.workouts.models import (
 )
 from app.modules.workouts.schemas import (
     ExerciseStats,
+    InsightsOut,
+    ReportOut,
     RepsAccepted,
     RepsIn,
     SessionCreate,
@@ -74,6 +77,86 @@ def get_session(
     return _get_own_session(db, user, session_id)
 
 
+def _view(session: WorkoutSession) -> insights.SessionView:
+    reps = tuple(
+        insights.RepView(r.index, r.score, tuple(r.feedback), r.resolved_parts) for r in session.reps
+    )
+    return insights.SessionView(session.id, session.exercise, session.started_at, reps)
+
+
+@router.get("/sessions/{session_id}/report", response_model=ReportOut)
+def session_report(
+    session_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """세션 리포트: 부위별 약점, 많이 지적된 자세, 이전 세션 대비 점수 변화."""
+    session = _get_own_session(db, user, session_id)
+    previous = db.scalar(
+        select(WorkoutSession)
+        .where(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.exercise == session.exercise,
+            WorkoutSession.status == SessionStatus.FINISHED.value,
+            WorkoutSession.id != session.id,
+            WorkoutSession.started_at < session.started_at,
+        )
+        .order_by(WorkoutSession.started_at.desc(), WorkoutSession.id.desc())
+        .options(selectinload(WorkoutSession.reps))
+    )
+    if previous is not None and not previous.reps:
+        previous = None
+    report = insights.session_report(_view(session), _view(previous) if previous else None)
+    duration = (session.finished_at - session.started_at).total_seconds() if session.finished_at else None
+    return {**report, "session": session, "duration_seconds": duration}
+
+
+@router.get("/insights", response_model=InsightsOut)
+def get_insights(
+    tz_offset: int = Query(0, ge=-840, le=840, description="사용자 시간대: UTC에서 동쪽으로 몇 분 (한국 540)"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """홈/기록 화면용 요약. 날짜 경계(연속 운동일, 주간 막대)는 tz_offset 기준 사용자의 하루로 센다."""
+    finished = (WorkoutSession.user_id == user.id, WorkoutSession.status == SessionStatus.FINISHED.value)
+    recent_sessions = list(
+        db.scalars(
+            select(WorkoutSession).where(*finished)
+            .order_by(WorkoutSession.started_at.desc(), WorkoutSession.id.desc())
+            .limit(60).options(selectinload(WorkoutSession.reps))
+        )
+    )[::-1]  # 오래된 순
+    views = [_view(s) for s in recent_sessions]
+    started = db.scalars(select(WorkoutSession.started_at).where(*finished, WorkoutSession.total_reps > 0)).all()
+    days = {insights.local_day(t, tz_offset) for t in started}
+    today = insights.local_day(utcnow(), tz_offset)
+    n_sessions, n_reps, avg = db.execute(
+        select(func.count(func.distinct(WorkoutSession.id)), func.count(RepRecord.id), func.avg(RepRecord.score))
+        .outerjoin(RepRecord, RepRecord.session_id == WorkoutSession.id)
+        .where(*finished)
+    ).one()
+    parts = insights.part_trends(views)
+    return {
+        "totals": {
+            "sessions": n_sessions, "reps": n_reps,
+            "avg_score": round(avg, 1) if avg is not None else None, "active_days": len(days),
+        },
+        "streak_days": insights.streak(days, today),
+        "today_done": today in days,
+        "week": insights.week_summary(views, today, tz_offset),
+        "parts": parts,
+        "weakest_part": insights.weakest(parts),
+        "recommendation": insights.recommend(views, parts, today, tz_offset),
+        "recent": [
+            {
+                "id": v.id, "exercise": v.exercise, "started_at": v.started_at, "total_reps": len(v.reps),
+                "avg_score": v.avg_score, "parts": insights.mean_parts(v.reps),
+            }
+            for v in views if v.reps
+        ][-30:],
+    }
+
+
 @router.post(
     "/sessions/{session_id}/reps",
     response_model=RepsAccepted,
@@ -104,6 +187,7 @@ def add_reps(
                 score=rep.score,
                 min_angle=rep.min_angle,
                 feedback=rep.feedback,
+                parts=rep.parts,
                 completed_at=rep.completed_at or utcnow(),
             )
         )
@@ -137,6 +221,7 @@ def finish_session(
             "score": rep.score,
             "min_angle": rep.min_angle,
             "feedback": rep.feedback,
+            "parts": rep.resolved_parts,
             "completed_at": rep.completed_at.isoformat() if rep.completed_at else str(utcnow())
         }
         for rep in session.reps

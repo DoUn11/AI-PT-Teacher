@@ -1,4 +1,4 @@
-import { ApiError } from "./api.js";
+import { ApiError } from "./api.js?v=20261129.1";
 
 // 재시도해도 소용없는 클라이언트 오류 (잘못된 요청, 세션 없음/종료 등)
 const PERMANENT = new Set([400, 403, 404, 409, 422]);

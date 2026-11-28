@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, create_engine
+from sqlalchemy import DateTime, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
 
@@ -53,3 +53,19 @@ def get_db() -> Iterator[Session]:
     # SessionLocal은 호출 시점에 모듈 전역에서 읽는다 (테스트에서 교체 가능).
     with SessionLocal() as db:
         yield db
+
+
+# create_all은 이미 있는 테이블에 새 칸을 더하지 못한다. Alembic을 도입하기 전까지 가볍게 채운다.
+_ADDED_COLUMNS = {"rep_records": {"parts": "JSON"}}
+
+
+def upgrade_schema(bind) -> None:
+    insp = inspect(bind)
+    for table, columns in _ADDED_COLUMNS.items():
+        if not insp.has_table(table):
+            continue
+        have = {c["name"] for c in insp.get_columns(table)}
+        with bind.begin() as conn:
+            for name, ddl in columns.items():
+                if name not in have:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))

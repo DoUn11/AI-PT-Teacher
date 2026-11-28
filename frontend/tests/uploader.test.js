@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ApiError } from "../src/api.js";
+import { ApiError } from "../src/api.js?v=20261129.1";
 import { RepUploader } from "../src/uploader.js";
 
 const rep = (index, score = 90, primaryMin = 95.123, feedback = []) => ({

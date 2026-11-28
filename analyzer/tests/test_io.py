@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from types import SimpleNamespace
 
 import cv2
@@ -9,10 +10,10 @@ import pytest
 
 from aipt_analyzer import Analyzer, Judgement, Pose, build_judge, load_exercise_config, register_judge
 from aipt_analyzer.estimators import create_estimator, pose_from_yolo_result
-from aipt_analyzer.pipeline import run_pipeline
+from aipt_analyzer.pipeline import PipelineParts, run_pipeline
 from aipt_analyzer.recorder import SessionRecorder
 from aipt_analyzer.results import RepResult, RepSummary
-from aipt_analyzer.sources import FileSource, LiveSource, open_source
+from aipt_analyzer.sources import FileSource, LiveSource, MqttSource, open_source, parse_mqtt_spec
 from aipt_analyzer.uploader import BackendClient, UploadWorker
 from tests.helpers import cycle, run, squat_pose
 
@@ -119,6 +120,62 @@ def test_live_source_returns_latest_frame_and_closes(video):
     assert not src._thread.is_alive()
 
 
+# ---- MQTT 소스 -------------------------------------------------------------
+
+
+def test_parse_mqtt_spec_defaults_and_tls():
+    assert parse_mqtt_spec("mqtt://pi.local") == ("pi.local", 1883, "aipt/camera/frame", False)
+    assert parse_mqtt_spec("mqtt://10.0.0.5:1884/a/b/frame") == ("10.0.0.5", 1884, "a/b/frame", False)
+    assert parse_mqtt_spec("mqtts://broker/x") == ("broker", 8883, "x", True)
+    with pytest.raises(ValueError, match="MQTT 주소"):
+        parse_mqtt_spec("tcp://10.0.0.5:8888")
+
+
+def test_mqtt_source_keeps_only_latest_frame_and_ignores_garbage():
+    pytest.importorskip("paho.mqtt.client")
+    src = open_source("mqtt://127.0.0.1:1/test/frame")  # 브로커 없이도 만들어져야 한다 (재시도만 함)
+    try:
+        assert isinstance(src, MqttSource)
+        assert src.read(timeout=0.05) is None
+
+        def jpeg(value):
+            ok, buf = cv2.imencode(".jpg", np.full((48, 64, 3), value, np.uint8))
+            return SimpleNamespace(payload=buf.tobytes())
+
+        src._on_message(None, None, SimpleNamespace(payload=b"not a jpeg"))
+        assert src.read(timeout=0.05) is None
+        src._on_message(None, None, jpeg(30))
+        src._on_message(None, None, jpeg(200))  # 소비 전에 두 장이 쌓이면 최신만 남는다
+        frame, _ = src.read(timeout=1.0)
+        assert frame.shape == (48, 64, 3) and frame.mean() > 150
+        assert src.read(timeout=0.05) is None
+    finally:
+        src.close()
+
+
+def test_mqtt_source_reports_rx_status_and_warns_when_silent(caplog):
+    pytest.importorskip("paho.mqtt.client")
+    caplog.set_level(logging.INFO, logger="aipt.mqtt")
+    src = MqttSource("mqtt://127.0.0.1:1/x/frame", report_interval=0.2)
+    try:
+        time.sleep(0.5)  # 브로커가 없으니 '연결되지 않았습니다' 경고
+        assert any("연결되지 않았습니다" in r.message for r in caplog.records)
+
+        ok, buf = cv2.imencode(".jpg", np.zeros((48, 64, 3), np.uint8))
+        src._connected = True
+        caplog.clear()
+        for _ in range(3):
+            src._on_message(None, None, SimpleNamespace(payload=buf.tobytes()))
+        time.sleep(0.3)
+        assert any("수신 중" in r.message and "fps" in r.message for r in caplog.records)
+
+        caplog.clear()
+        time.sleep(0.5)  # 연결은 됐는데 프레임이 안 오면 토픽 확인을 안내
+        assert any("프레임이 없습니다" in r.message and "x/frame" in r.message for r in caplog.records)
+    finally:
+        src.close()
+
+
 # ---- 파이프라인 + 기록 -----------------------------------------------------
 
 
@@ -188,6 +245,200 @@ def test_pipeline_stops_after_seconds_for_endless_source():
 
     cfg = load_exercise_config("squat")
     run_pipeline(Analyzer(cfg), Endless(0), FakeEstimator(iter(lambda: None, 1)), seconds=0.05)
+
+
+def test_pipeline_hands_annotated_frames_to_callback_without_a_window():
+    class FakeOverlay:
+        def render(self, frame, result, now, text=True):
+            self.calls.append(text)
+            return frame + 1  # 오버레이가 그려진 프레임이라는 표식
+
+        calls: list = []
+
+    cfg = load_exercise_config("squat")
+    poses = [squat_pose(k) for k in cycle(172, 90)]
+    got, results = [], []
+    overlay = FakeOverlay()
+    run_pipeline(
+        Analyzer(cfg), FakeSource(len(poses)), FakeEstimator(poses),
+        overlay=overlay, show=False, on_annotated=got.append, on_result=results.append,
+    )  # show=False면 cv2.imshow/waitKey를 부르지 않는다 (창 없는 환경에서도 동작)
+    assert len(got) == len(poses) and got[0].mean() == 1
+    assert set(overlay.calls) == {False}  # 웹으로 내보내는 프레임에는 글자를 쓰지 않는다
+    assert len(results) == len(poses)
+
+
+def test_overlay_without_text_draws_nothing_when_no_person():
+    from aipt_analyzer.overlay import Overlay
+    from aipt_analyzer.results import FrameResult
+
+    ov = Overlay("squat", {}, "knee_angle", font_path=None)
+    blank = np.zeros((240, 320, 3), np.uint8)
+    res = FrameResult(visible=False, pose=None)
+    assert ov.render(blank, res, 0.0).any()  # 글자 모드: '사람이 보이지 않아요' 문구가 그려진다
+    assert not ov.render(blank, res, 0.0, text=False).any()  # 선 모드: 아무 글자도 없다
+
+
+def test_analysis_publisher_payload_contract():
+    pytest.importorskip("paho.mqtt.client")
+    from aipt_analyzer.publisher import AnalysisPublisher
+
+    cfg = load_exercise_config("squat")
+    an = Analyzer(cfg)
+    pub = AnalysisPublisher("mqtt://127.0.0.1:1/x/analysis", cfg, rate_hz=1000)
+    try:
+        results = run(an, [squat_pose(k, lean=20) for k in cycle(172, 90)])
+        payloads = [pub.payload(r, now=10.0) for r in results]
+        last = payloads[-1]
+        assert last["v"] == 3 and last["exercise"] == "squat" and last["reps"] == 1
+        assert last["primary"]["feature"] == "knee_angle" and isinstance(last["primary"]["value"], float)
+        assert last["thresholds"] == {"up": 160, "count": 130, "target": 100}
+        assert last["last_rep"]["index"] == 1 and last["rep_scores"] == [last["last_rep"]["score"]]
+        assert payloads[0]["last_rep"] is None and payloads[0]["rep_scores"] == []
+        import json
+        json.dumps(last)  # JSON으로 직렬화 가능해야 한다
+        assert pub.update(results[0]) is False  # 브로커가 없으면 보내지 않고 조용히 건너뛴다
+    finally:
+        pub.close()
+
+
+def test_analysis_payload_follows_new_calibrated_config_semantics():
+    """새 분석기(보정된 설정): 비율 특징, 반복 후 판정(live=False), 꺼 둔 조건(enabled=False)."""
+    pytest.importorskip("paho.mqtt.client")
+    import json
+
+    from aipt_analyzer.publisher import AnalysisPublisher
+    from tests.helpers import frontal_pose
+
+    cfg = load_exercise_config("sidecrunch")
+    pub = AnalysisPublisher("mqtt://127.0.0.1:1/x/analysis", cfg, rate_hz=1000)
+    try:
+        an = Analyzer(cfg)
+        res = an.process(frontal_pose(knee_h=-0.7), 0.0)
+        p = pub.payload(res, now=1.0)
+        by_code = {c["code"]: c for c in p["checks"]}
+        assert "gaze_front" not in by_code  # enabled=False인 조건은 보내지 않는다
+        assert set(by_code) == {c.code for c in cfg.form_checks if c.enabled}
+        assert by_code["knee_side"]["live"] is False and by_code["knee_side"]["state"] == "pending"  # 아직 반복 없음
+        assert by_code["hands_behind_head"]["live"] is True and by_code["hands_behind_head"]["value"] is not None
+        assert by_code["hands_behind_head"]["direction"] == "above"
+        assert p["primary"]["feature"] == "knee_gap" and 0.5 < p["primary"]["value"] < 1.0  # 비율. 소수점이 살아 있다
+        json.dumps(p)
+
+    finally:
+        pub.close()
+
+    # 니업: 무릎을 덜 올린 반복 -> 반복 후 판정 조건(knee_low, live=False)이 마지막 반복의 값으로 채워지고 bad가 된다
+    kcfg = load_exercise_config("kneeup")
+    kpub = AnalysisPublisher("mqtt://127.0.0.1:1/x/analysis", kcfg, rate_hz=1000)
+    try:
+        an = Analyzer(kcfg)
+        results = run(an, [frontal_pose(k) for k in cycle(-0.9, -0.38)])
+        before = {c["code"]: c for c in kpub.payload(results[0], now=1.0)["checks"]}
+        assert before["knee_low"]["state"] == "pending" and before["knee_low"]["value"] is None
+        rep = next(r for r in results if r.rep)
+        after = kpub.payload(rep, now=2.0)
+        knee_low = {c["code"]: c for c in after["checks"]}["knee_low"]
+        assert knee_low["state"] == "bad" and knee_low["value"] is not None and knee_low["severity"] >= 0.5
+        assert after["last_rep"]["feedback"] == ["knee_low"] and after["last_rep"]["score"] == 70
+        assert after["thresholds"]["target"] == 0.58  # 비율 기준선이 소수점 그대로 간다
+    finally:
+        kpub.close()
+
+
+def test_frame_publisher_encodes_jpeg_and_never_raises_without_broker():
+    pytest.importorskip("paho.mqtt.client")
+    from aipt_analyzer.publisher import FramePublisher
+
+    pub = FramePublisher("mqtt://127.0.0.1:1/x/analyzed")  # 브로커 없음
+    try:
+        assert pub.publish(np.zeros((48, 64, 3), np.uint8)) is False  # 연결 전: 건너뛴다
+        assert pub.dropped == 1 and pub.sent == 0
+    finally:
+        pub.close()
+
+
+def test_pipeline_switch_swaps_all_parts_mid_stream():
+    from aipt_analyzer.results import FrameResult
+
+    class FakeAnalyzer:
+        def __init__(self, name, log):
+            self.name, self.log = name, log
+            self.counter = type("C", (), {"reps": 0})()
+
+        def process(self, pose, t):
+            self.log.append(self.name)
+            return FrameResult(visible=False, pose=None)
+
+    log, switched = [], {"n": 0}
+    first, second = FakeAnalyzer("a", log), FakeAnalyzer("b", log)
+    new_worker = FakeWorker()
+
+    def switch():
+        switched["n"] += 1
+        return PipelineParts(second, None, None, new_worker) if switched["n"] == 4 else None
+
+    run_pipeline(first, FakeSource(8), FakeEstimator(iter(lambda: None, 1)), switch=switch)
+    assert log == ["a"] * 3 + ["b"] * 5  # 4번째 프레임부터 새 분석기가 처리한다
+    assert switched["n"] >= 8  # 프레임마다 물어본다
+
+
+def test_exercise_control_keeps_latest_valid_request_only():
+    pytest.importorskip("paho.mqtt.client")
+    from aipt_analyzer.control import ExerciseControl
+
+    ctl = ExerciseControl("mqtt://127.0.0.1:1/x/control")  # 브로커 없이도 만들어진다
+    msg = lambda payload, retain=False: SimpleNamespace(payload=payload, retain=retain)  # noqa: E731
+    try:
+        assert ctl.take() is None
+        ctl._on_message(None, None, msg(b'{"exercise": "kneeup"}'))
+        ctl._on_message(None, None, msg(b'{"exercise": "pushup"}'))
+        assert ctl.take() == ("select", "pushup")  # 가장 최근 요청
+        assert ctl.take() is None  # 한 번 가져가면 비워진다
+        for bad in (b"not json", b'{"exercise": "nope"}', b'{"x": 1}', b"[1]"):
+            ctl._on_message(None, None, msg(bad))
+        ctl._on_message(None, None, msg(b'{"exercise": "kneeup"}', retain=True))  # 남아 있던 옛 요청
+        assert ctl.take() is None
+    finally:
+        ctl.close()
+
+
+def test_analysis_publisher_restarts_counts_when_exercise_changes():
+    pytest.importorskip("paho.mqtt.client")
+    from aipt_analyzer.publisher import AnalysisPublisher
+
+    cfg = load_exercise_config("squat")
+    pub = AnalysisPublisher("mqtt://127.0.0.1:1/x/analysis", cfg, rate_hz=1000)
+    try:
+        results = run(Analyzer(cfg), [squat_pose(k, lean=20) for k in cycle(172, 90)])
+        done = next(r for r in results if r.rep)
+        before = pub.payload(done, now=5.0)
+        assert before["reps"] == 1 and before["rep_scores"] and before["last_rep"]
+        new_cfg = load_exercise_config("kneeup")
+        pub.set_config(new_cfg)
+        fresh = pub.payload(Analyzer(new_cfg).process(None, 0.0), now=6.0)
+        assert fresh["exercise"] == "kneeup" and fresh["reps"] == 0
+        assert fresh["last_rep"] is None and fresh["rep_scores"] == []  # 이전 운동 기록이 남지 않는다
+        assert fresh["primary"]["feature"] == "knee_gap" and fresh["thresholds"]["target"] == 0.58
+        assert {c["code"] for c in fresh["checks"]} == {c.code for c in new_cfg.form_checks if c.enabled}
+    finally:
+        pub.close()
+
+
+def test_starting_a_new_session_drops_pending_reps_of_the_previous_exercise():
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(201, json={"id": len(calls)})
+
+    client = BackendClient("http://x", "a@b.c", "pw", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    client._token = "t"
+    client.start_session("pushup")
+    client.enqueue(make_rep(1))
+    assert client.pending_count == 1  # 못 보낸 rep이 남은 채로
+    client.start_session("kneeup")  # 운동을 바꿔 새 세션
+    assert client.pending_count == 0 and client.session_id == 2
 
 
 # ---- 업로더 ---------------------------------------------------------------

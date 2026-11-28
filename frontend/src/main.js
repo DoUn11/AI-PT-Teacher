@@ -1,9 +1,11 @@
-import "./appearance.js?v=20261127.1";
-import { createExercisePicker } from "./exercise-picker.js?v=20261127.1";
-import { Api, AuthError, DEFAULT_BASE } from "./api.js";
-import { CameraSession } from "./camera.js?v=20261127.1";
-import { loadDashboard } from "./dashboard.js?v=20261127.1";
-import { EXERCISE_LABELS, DISPLAY_EXERCISE_LABELS, PLANNED_EXERCISE_LABELS, exerciseLabel, h } from "./dom.js?v=20261127.1";
+import "./appearance.js?v=20261129.1";
+import { createExercisePicker } from "./exercise-picker.js?v=20261129.1";
+import { Api, AuthError, DEFAULT_BASE } from "./api.js?v=20261129.1";
+import { CameraSession } from "./camera.js?v=20261129.1";
+import { loadDashboard } from "./dashboard.js?v=20261129.1";
+import { loadHome } from "./home.js?v=20261129.1";
+import { mountPiCamera } from "./pi-camera.js?v=20261129.1";
+import { EXERCISE_LABELS, DISPLAY_EXERCISE_LABELS, PLANNED_EXERCISE_LABELS, exerciseLabel, h } from "./dom.js?v=20261129.1";
 
 const $ = (id) => document.getElementById(id);
 const api = new Api(DEFAULT_BASE);
@@ -12,6 +14,9 @@ let configs = {};
 let camera = null;
 let registering = false;
 let exercisePicker;
+let piCamera = null;
+const TABS = ["home", "pi", "camera", "dashboard"];
+const DEFAULT_TAB = "home";
 
 async function loadJson(path) {
   const res = await fetch(path);
@@ -23,11 +28,11 @@ async function loadJson(path) {
 
 function showAuth(message = "") {
   stopCamera();
+  piCamera?.stop();
   api.logout();
   $("auth").hidden = false;
   $("app").hidden = true;
-  $("btn-camera").removeAttribute("aria-current");
-  $("btn-dashboard").removeAttribute("aria-current");
+  for (const tab of TABS) $(`btn-${tab}`).removeAttribute("aria-current");
   $("logout").hidden = true;
   $("who").textContent = "";
   $("auth-error").textContent = message;
@@ -40,7 +45,18 @@ async function showApp() {
   $("main-nav").hidden = false;
   $("logout").hidden = false;
   $("who").textContent = me.nickname; // textContent: 닉네임을 HTML로 해석하지 않는다
-  showTab(new URLSearchParams(location.search).get("tab") === "dashboard" ? "dashboard" : "camera");
+  const wanted = new URLSearchParams(location.search).get("tab");
+  showTab(TABS.includes(wanted) ? wanted : DEFAULT_TAB);
+}
+
+// 화면 이동. params의 값은 주소(?tab=...&session=3)에 실려 새로고침해도 같은 화면이 열린다. null이면 뺀다.
+function navigate(tab, params = {}) {
+  const url = new URL(location.href);
+  url.search = "";
+  url.searchParams.set("tab", tab);
+  for (const [key, value] of Object.entries(params)) if (value != null) url.searchParams.set(key, String(value));
+  history.pushState(null, "", url);
+  showTab(tab);
 }
 
 function showTab(name) {
@@ -50,12 +66,20 @@ function showTab(name) {
   window.scrollTo({ top: 0, behavior: "instant" });
   exercisePicker?.close();
   if (name !== "camera") stopCamera();
-  for (const tab of ["camera", "dashboard"]) {
+  if (name !== "pi") piCamera?.stop();
+  for (const tab of TABS) {
     $(`tab-${tab}`).hidden = tab !== name;
     $(`btn-${tab}`).toggleAttribute("aria-current", tab === name);
     if (tab === name) $(`btn-${tab}`).setAttribute("aria-current", "page");
   }
-  if (name === "dashboard") loadDashboard($("tab-dashboard"), { api, exerciseLabels: DISPLAY_EXERCISE_LABELS, messages, onAuthError: () => showAuth("로그인이 만료되었습니다.") });
+  const ctx = { api, messages, navigate, onAuthError: () => showAuth("로그인이 만료되었습니다.") };
+  if (name === "home") loadHome($("tab-home"), ctx);
+  if (name === "pi") {
+    piCamera ??= mountPiCamera($("tab-pi"), ctx);
+    piCamera.preselect(new URLSearchParams(location.search).get("exercise"));
+    piCamera.start();
+  }
+  if (name === "dashboard") loadDashboard($("tab-dashboard"), { ...ctx, exerciseLabels: DISPLAY_EXERCISE_LABELS });
 }
 
 // ---- 로그인 / 회원가입 ----------------------------------------------------
@@ -156,13 +180,18 @@ async function init() {
     $("auth-error").textContent = "";
   });
   $("logout").addEventListener("click", () => showAuth());
-  for (const tab of ["camera", "dashboard"]) {
+  for (const tab of TABS) {
     $(`btn-${tab}`).addEventListener("click", (event) => {
       event.preventDefault();
       if ($("app").hidden) return;
-      showTab(tab);
+      navigate(tab);
     });
   }
+  window.addEventListener("popstate", () => {
+    if ($("app").hidden) return;
+    const wanted = new URLSearchParams(location.search).get("tab");
+    showTab(TABS.includes(wanted) ? wanted : DEFAULT_TAB);
+  });
   $("auth-submit").disabled = false;
   $("register").disabled = false;
   $("start").addEventListener("click", startCamera);

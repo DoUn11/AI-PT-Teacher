@@ -13,7 +13,9 @@ dependencies = [
 [project.optional-dependencies]
 # 자세 추정 모델 (torch를 끌고 와서 무거우므로 분리)
 yolo = ["ultralytics>=8.3"]
-dev = ["pytest>=8"]
+# Pi가 MQTT로 보내는 영상을 받을 때 (--source mqtt://...)
+mqtt = ["paho-mqtt>=2.0"]
+dev = ["pytest>=8", "paho-mqtt>=2.0"]
 
 [project.scripts]
 aipt-analyzer = "aipt_analyzer.cli:main"

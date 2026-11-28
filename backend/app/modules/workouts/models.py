@@ -51,6 +51,14 @@ class RepRecord(Base):
     score: Mapped[int] = mapped_column(Integer)
     min_angle: Mapped[float] = mapped_column(Float)
     feedback: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # 부위별 약점 {arms, torso, legs} 0~1. 분석기가 보낸 값 (없으면 피드백 코드에서 만든다)
+    parts: Mapped[dict[str, float] | None] = mapped_column(JSON, default=None)
     completed_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
     session: Mapped[WorkoutSession] = relationship(back_populates="reps")
+
+    @property
+    def resolved_parts(self) -> dict[str, float]:
+        from app.modules.workouts.body_parts import resolve_parts
+
+        return resolve_parts(self.session.exercise, self.feedback, self.parts)
