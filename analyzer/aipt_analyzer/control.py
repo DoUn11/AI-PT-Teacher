@@ -13,17 +13,41 @@ from aipt_analyzer.sources import parse_mqtt_spec
 log = logging.getLogger("aipt.control")
 
 
+class Plan(NamedTuple):
+    """이번 운동의 목표: 몇 세트를 몇 회씩, 세트 사이에 몇 초 쉬는가."""
+
+    sets: int
+    reps: int
+    rest_seconds: int = 60
+
+
 class Command(NamedTuple):
-    action: str  # select(운동만 고름) | start(세션 시작) | stop(세션 종료)
+    action: str  # select(운동만 고름) | start(세션 시작) | stop(세션 종료) | skip_rest(휴식 건너뛰기)
     exercise: str | None = None
+    plan: Plan | None = None  # start일 때만. 없으면 목표 없이 자유롭게 한다
+
+
+def parse_plan(raw) -> Plan | None:
+    """제어 메시지의 plan을 검사한다. 범위를 벗어나면 ValueError."""
+    if raw is None:
+        return None
+    try:
+        plan = Plan(int(raw["sets"]), int(raw["reps"]), int(raw.get("rest_seconds", 60)))
+    except (KeyError, TypeError, ValueError, AttributeError) as e:
+        raise ValueError(f"bad plan: {raw!r}") from e
+    if not (1 <= plan.sets <= 10 and 1 <= plan.reps <= 100 and 0 <= plan.rest_seconds <= 600):
+        raise ValueError(f"plan out of range: {raw!r}")
+    return plan
 
 
 class ExerciseControl:
     """제어 토픽을 구독하고, 가장 최근 명령 하나를 보관한다.
 
         {"exercise": "kneeup"}                      운동 고르기 (select)
-        {"action": "start", "exercise": "kneeup"}   세션 시작 (exercise 생략하면 지금 운동)
+        {"action": "start", "exercise": "kneeup",
+         "plan": {"sets": 3, "reps": 10, "rest_seconds": 60}}   세션 시작 (plan 생략하면 목표 없이 자유롭게)
         {"action": "stop"}                          세션 종료
+        {"action": "skip_rest"}                     휴식 건너뛰기
 
     영상 루프가 take()로 가져가 처리한다. 모르는 운동/동작이나 깨진 메시지는 무시한다.
     인증이 필요하면 환경변수 MQTT_USERNAME / MQTT_PASSWORD.
@@ -60,17 +84,18 @@ class ExerciseControl:
             data = json.loads(msg.payload)
             action = data.get("action", "select")
             name = data.get("exercise")
+            plan = parse_plan(data.get("plan"))
         except (ValueError, AttributeError, TypeError):
             log.warning("제어 메시지 형식 오류, 무시")
             return
-        if action not in ("select", "start", "stop") or (action == "select" and name is None):
+        if action not in ("select", "start", "stop", "skip_rest") or (action == "select" and name is None):
             log.warning("지원하지 않는 제어 요청, 무시: %r", data)
             return
         if name is not None and name not in available_exercises():
             log.warning("지원하지 않는 운동 요청, 무시: %r", name)
             return
         with self._lock:
-            self._pending = Command(action, name)
+            self._pending = Command(action, name, plan)
 
     def take(self) -> Command | None:
         with self._lock:

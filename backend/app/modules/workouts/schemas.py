@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.modules.workouts.body_parts import PARTS
 
@@ -10,6 +10,19 @@ from app.modules.workouts.models import Exercise
 
 class SessionCreate(BaseModel):
     exercise: Exercise
+    # 이번 운동의 목표 (셋 다 함께 보내거나 모두 생략 = 목표 없이 자유롭게)
+    target_sets: int | None = Field(default=None, ge=1, le=10)
+    target_reps: int | None = Field(default=None, ge=1, le=100)
+    rest_seconds: int | None = Field(default=None, ge=0, le=600)
+
+    @model_validator(mode="after")
+    def _all_or_none(self):
+        given = [v is not None for v in (self.target_sets, self.target_reps)]
+        if any(given) and not all(given):
+            raise ValueError("target_sets and target_reps must be given together")
+        if self.target_sets is not None and self.rest_seconds is None:
+            self.rest_seconds = 60
+        return self
 
 
 class RepIn(BaseModel):
@@ -71,6 +84,9 @@ class SessionOut(BaseModel):
     finished_at: datetime | None
     total_reps: int
     avg_score: float | None
+    target_sets: int | None = None
+    target_reps: int | None = None
+    rest_seconds: int | None = None
 
 
 class SessionDetail(SessionOut):
@@ -116,6 +132,40 @@ class PreviousSession(BaseModel):
     avg_score: float
 
 
+class SetResult(BaseModel):
+    set: int
+    reps: int
+    avg_score: float | None
+
+
+class PlanResult(BaseModel):
+    """목표가 있는 세션의 결과: 목표 대비 얼마나 했나, 세트별 횟수와 점수."""
+
+    sets: int
+    reps: int
+    rest_seconds: int | None
+    completed_sets: int
+    completion: float  # 0~1, 목표 총 횟수 대비
+    per_set: list[SetResult]
+
+
+class SetsReps(BaseModel):
+    sets: int
+    reps: int
+
+
+class PlanChange(BaseModel):
+    """한 세션을 평가한 결과. change: up(올림) | hold(그대로) | down(낮춤)"""
+
+    session_id: int
+    change: Literal["up", "hold", "down"]
+    reason: str  # 웹이 문구로 바꾼다: ready_up new_set wait_more low_quality incomplete struggled at_floor at_max
+    need_more: int | None = None
+    before: SetsReps
+    after: SetsReps
+    applied: bool  # 이미 목표에 반영했는가 (자동 조정이 꺼져 있으면 False)
+
+
 class ReportOut(BaseModel):
     """끝난 세션 한 번을 풀어 주는 리포트 (웹 '세션 리포트' 화면)."""
 
@@ -131,6 +181,8 @@ class ReportOut(BaseModel):
     issues: list[IssueOut]  # 많이 지적된 순
     previous: PreviousSession | None  # 같은 운동의 바로 이전 세션
     score_delta: float | None  # 이전 세션 대비 평균 점수 차
+    plan: PlanResult | None = None  # 목표가 있던 세션만
+    next_plan: PlanChange | None = None  # 이 세션을 평가해 정한 다음 목표
 
 
 class TotalsOut(BaseModel):
@@ -181,3 +233,44 @@ class InsightsOut(BaseModel):
     weakest_part: PartName | None
     recommendation: Recommendation | None
     recent: list[RecentSession]  # 오래된 순 (추이 그래프용)
+
+
+# ---- 운동 목표(플랜) ----------------------------------------------------------
+
+Pace = Literal["slow", "normal", "fast"]
+
+
+class PlanIn(BaseModel):
+    sets: int = Field(ge=1, le=10)
+    reps: int = Field(ge=1, le=100)
+    rest_seconds: int = Field(ge=0, le=600)
+    pace: Pace = "normal"
+    auto_progress: bool = True
+
+
+class PlanLimits(BaseModel):
+    floor: int
+    ceiling: int
+    max_sets: int
+
+
+class LastSession(BaseModel):
+    id: int
+    started_at: datetime
+    reps_done: int
+    target_total: int | None
+    avg_score: float | None
+
+
+class PlanOut(BaseModel):
+    exercise: Exercise
+    sets: int
+    reps: int
+    rest_seconds: int
+    pace: Pace
+    auto_progress: bool
+    is_default: bool  # 아직 저장한 목표가 없어 기록으로 정한 시작값이다
+    suggestion: PlanChange | None  # 자동 조정이 꺼져 있을 때 제안 (적용하려면 PUT)
+    last_change: PlanChange | None
+    limits: PlanLimits
+    last_session: LastSession | None

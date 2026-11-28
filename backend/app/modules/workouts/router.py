@@ -8,7 +8,7 @@ from app.core.firebase import save_workout_session_to_firebase
 from app.db import get_db
 from app.modules.auth.deps import get_current_user
 from app.modules.auth.models import User, utcnow
-from app.modules.workouts import insights
+from app.modules.workouts import insights, plans, progression
 from app.modules.workouts.models import (
     Exercise,
     RepRecord,
@@ -18,6 +18,8 @@ from app.modules.workouts.models import (
 from app.modules.workouts.schemas import (
     ExerciseStats,
     InsightsOut,
+    PlanIn,
+    PlanOut,
     ReportOut,
     RepsAccepted,
     RepsIn,
@@ -47,7 +49,8 @@ def create_session(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    session = WorkoutSession(user_id=user.id, exercise=body.exercise.value)
+    session = WorkoutSession(user_id=user.id, exercise=body.exercise.value, target_sets=body.target_sets,
+                             target_reps=body.target_reps, rest_seconds=body.rest_seconds)
     db.add(session)
     db.commit()
     return session
@@ -84,6 +87,41 @@ def _view(session: WorkoutSession) -> insights.SessionView:
     return insights.SessionView(session.id, session.exercise, session.started_at, reps)
 
 
+def _plan_result(session: WorkoutSession) -> dict | None:
+    if session.target_sets is None or session.target_reps is None:
+        return None
+    per = session.target_reps
+    groups: dict[int, list] = {}
+    for rep in session.reps:
+        groups.setdefault((rep.index - 1) // per + 1, []).append(rep)
+    done = progression.Result(session.id, session.target_sets, per, len(session.reps), session.avg_score)
+    return {
+        "sets": session.target_sets, "reps": per, "rest_seconds": session.rest_seconds,
+        "completed_sets": done.completed_sets, "completion": round(done.completion, 3),
+        "per_set": [
+            {"set": k, "reps": len(rs), "avg_score": round(sum(r.score for r in rs) / len(rs), 1)}
+            for k, rs in sorted(groups.items()) if k <= session.target_sets
+        ],
+    }
+
+
+@router.get("/plans", response_model=list[PlanOut])
+def list_plans(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """운동 카드용: 운동마다 지금 목표(세트 x 횟수), 강도 조절 방식, 다음 목표 제안, 지난 운동 결과."""
+    return [plans.plan_view(db, user.id, ex) for ex in plans.EXERCISES]
+
+
+@router.put("/plans/{exercise}", response_model=PlanOut)
+def save_plan(exercise: Exercise, body: PlanIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """목표와 강도 조절 방식을 저장한다. 세트·횟수를 바꾸면 그때부터의 기록으로 다음 목표를 계산한다."""
+    lim = progression.limits(exercise.value)
+    if body.sets > lim.max_sets:
+        raise HTTPException(422, f"sets must be <= {lim.max_sets} for {exercise.value}")
+    plans.save_plan(db, user.id, exercise.value, sets=body.sets, reps=body.reps, rest_seconds=body.rest_seconds,
+                    pace=body.pace, auto_progress=body.auto_progress)
+    return plans.plan_view(db, user.id, exercise.value)
+
+
 @router.get("/sessions/{session_id}/report", response_model=ReportOut)
 def session_report(
     session_id: int,
@@ -108,7 +146,10 @@ def session_report(
         previous = None
     report = insights.session_report(_view(session), _view(previous) if previous else None)
     duration = (session.finished_at - session.started_at).total_seconds() if session.finished_at else None
-    return {**report, "session": session, "duration_seconds": duration}
+    plan = plans.get_plan(db, user.id, session.exercise)
+    change = plan.last_change if plan and plan.last_change and plan.last_change.get("session_id") == session.id else None
+    return {**report, "session": session, "duration_seconds": duration,
+            "plan": _plan_result(session), "next_plan": change}
 
 
 @router.get("/insights", response_model=InsightsOut)
@@ -214,7 +255,8 @@ def finish_session(
     session.avg_score = round(sum(scores) / len(scores), 1) if scores else None
     db.commit()
     db.refresh(session)
-    
+    plans.after_finish(db, session)  # 목표가 있던 세션이면 다음 목표를 평가한다 (자동 조정이 켜져 있으면 바로 반영)
+
     reps_list_data = [
         {
             "index": rep.index,

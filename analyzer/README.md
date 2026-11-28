@@ -152,6 +152,7 @@ aipt_analyzer/
 웹의 **운동 시작**을 누르면(`{"action":"start","exercise":"..."}`) 백엔드에 세션을 열고 0회부터 세며(`station.py`), **운동 종료**(`{"action":"stop"}`)를 누르면 남은 반복을 올리고
 세션을 닫은 뒤 방금 끝난 세션의 id를 분석 정보(`session.last`)로 알린다. 웹은 그 id의 리포트로 이동한다. `--control` 없이 쓰면 예전처럼 켜자마자 세션이 열리고 종료할 때 닫힌다.
 
+- 시작에 `plan`(`{sets, reps, rest_seconds}`)이 있으면 세트를 진행한다: 5초 준비 → 세트 → 휴식 → … → 마지막 세트를 채우면 저절로 종료. 쉬거나 준비하는 동안은 횟수를 세지 않고 올리지도 않는다. `{"action":"skip_rest"}`로 건너뛴다. 운동 중에는 `select`/`start`를 무시한다.
 - 반복마다 `parts`(팔·몸통·다리 약점, 0~1)를 함께 올린다. 판정기가 지적한 항목만 보고 계산한다(`severity.rep_parts`).
-- 분석 정보 JSON은 `v: 3`부터 `session: {state: idle|active, id, started_at, last}`를 싣는다.
+- 분석 정보 JSON은 `v: 3`부터 `session: {state: idle|active, id, started_at, last}`를, `v: 4`부터 `session.progress`(세트 번호, 세트 내 횟수, 상태 ready|working|resting, 남은 초)를 싣는다.
 - 전체 흐름과 화면은 [../docs/USECASES.md](../docs/USECASES.md).

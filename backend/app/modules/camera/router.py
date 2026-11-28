@@ -123,7 +123,10 @@ def start_session(body: SessionStart, _: User = Depends(get_current_user)):
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Camera control is not enabled (MQTT_URL)")
     if _current_session() == "active":
         raise HTTPException(status.HTTP_409_CONFLICT, "A workout session is already running")
-    _session_control({"action": "start", "exercise": body.exercise.value})
+    command = {"action": "start", "exercise": body.exercise.value}
+    if body.sets is not None:
+        command["plan"] = {"sets": body.sets, "reps": body.reps, "rest_seconds": body.rest_seconds}
+    _session_control(command)
     return {"requested": "start", "exercise": body.exercise.value}
 
 
@@ -136,6 +139,17 @@ def stop_session(_: User = Depends(get_current_user)):
         raise HTTPException(status.HTTP_409_CONFLICT, "No workout session is running")
     _session_control({"action": "stop"})
     return {"requested": "stop"}
+
+
+@router.post("/session/skip-rest", response_model=SessionRequested, status_code=status.HTTP_202_ACCEPTED)
+def skip_rest(_: User = Depends(get_current_user)):
+    """세트 사이 휴식(또는 시작 전 준비 시간)을 건너뛰고 바로 다음 세트를 시작한다."""
+    if service.control is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Camera control is not enabled (MQTT_URL)")
+    if _current_session() != "active":
+        raise HTTPException(status.HTTP_409_CONFLICT, "No workout session is running")
+    _session_control({"action": "skip_rest"})
+    return {"requested": "skip_rest"}
 
 
 @router.get("/snapshot", responses={200: {"content": {"image/jpeg": {}}}})

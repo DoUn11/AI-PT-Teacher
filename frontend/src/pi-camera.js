@@ -1,6 +1,6 @@
 // Pi 카메라 화면: 백엔드가 MQTT로 받은 영상(MJPEG)과 연결 상태, 최근 연결 기록
 import { AuthError } from "./api.js?v=20261129.1";
-import { EXERCISE_LABELS, h } from "./dom.js?v=20261129.1";
+import { h } from "./dom.js?v=20261129.1";
 import { createAnalysisPanel } from "./analysis-panel.js?v=20261129.1";
 
 const STATUS_POLL_MS = 2000;
@@ -45,14 +45,12 @@ export function mountPiCamera(root, { api, onAuthError, navigate = null, message
       throw e;
     }
   };
+  // 운동은 '운동' 탭의 카드에서 골라 시작하므로 이 패널에는 종료와 휴식 건너뛰기만 있다
   const panel = createAnalysisPanel(messages, {
-    exercises: Object.keys(EXERCISE_LABELS),
-    onSelect: guarded((key) => api.setCameraExercise(key)),
-    onStart: guarded((key) => api.startWorkout(key)),
     onStop: guarded(() => api.stopWorkout()),
-    onReport: (id) => navigate?.("dashboard", { session: id }), // 내가 운동을 끝내면 바로 리포트로
+    onSkipRest: guarded(() => api.skipRest()),
+    onReport: (id) => navigate?.("dashboard", { session: id }), // 내가 운동을 끝내면(또는 목표를 다 채우면) 바로 리포트로
   });
-  let wanted = null; // 다른 화면(홈 추천 등)에서 골라 온 운동. 분석기가 켜져 있으면 한 번 적용한다
   // 영상 종류: 기본은 자동(분석기가 켜져 있으면 분석 화면, 아니면 원본). 직접 고르면 그대로 유지한다.
   const sourceButtons = {
     analyzed: h("button", { type: "button", class: "ghost", "aria-pressed": "false" }, "분석 화면"),
@@ -148,7 +146,6 @@ export function mountPiCamera(root, { api, onAuthError, navigate = null, message
     try {
       const data = await api.cameraAnalysis();
       panel.update(data);
-      if (wanted && data.online) { panel.select(wanted); wanted = null; }
     } catch (e) {
       if (e instanceof AuthError) return onAuthError();
       // 그 밖의 오류는 영상 상태 줄이 알려 준다
@@ -157,7 +154,6 @@ export function mountPiCamera(root, { api, onAuthError, navigate = null, message
   }
 
   return {
-    preselect(exercise) { wanted = exercise ?? null; },
     start() {
       if (running) return;
       running = true;

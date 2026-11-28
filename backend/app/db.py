@@ -56,7 +56,10 @@ def get_db() -> Iterator[Session]:
 
 
 # create_all은 이미 있는 테이블에 새 칸을 더하지 못한다. Alembic을 도입하기 전까지 가볍게 채운다.
-_ADDED_COLUMNS = {"rep_records": {"parts": "JSON"}}
+_ADDED_COLUMNS = {
+    "rep_records": {"parts": "JSON"},
+    "workout_sessions": {"target_sets": "INTEGER", "target_reps": "INTEGER", "rest_seconds": "INTEGER"},
+}
 
 
 def upgrade_schema(bind) -> None:

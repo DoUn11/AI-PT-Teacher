@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             overlay=parts.overlay, recorder=parts.recorder, worker=parts.worker, seconds=args.seconds,
             show=not args.no_show, on_annotated=publisher.publish if publisher else None,
             on_result=info_publisher.update if info_publisher else None,
-            switch=(lambda: station.handle(control.take())) if control else None,
+            switch=(lambda: station.step(control.take())) if control else None,
         )
         print(f"완료: {station.parts.analyzer.counter.reps}회")
         return 0

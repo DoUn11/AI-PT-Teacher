@@ -1,5 +1,6 @@
 // 영상 아래 분석 패널. 한 번 만들어 두고 값만 바꿔 그린다 (게이지·점수 링이 부드럽게 움직이도록).
-import { h } from "./dom.js?v=20261129.1";
+import { exerciseLabel, h } from "./dom.js?v=20261129.1";
+import { progressView } from "./plan-view.js?v=20261129.1";
 import { analysisView, selectErrorText, selectorView, sessionErrorText } from "./analysis-view.js?v=20261129.1";
 
 const SELECT_TIMEOUT_MS = 6000; // 이 시간 안에 analyzer가 바뀌지 않으면 실패로 본다
@@ -7,7 +8,7 @@ const STOP_TIMEOUT_MS = 12000; // 종료는 남은 반복을 올리고 세션을
 
 // exercises: 고를 수 있는 운동 키 목록, onSelect(key): 서버에 선택을 보낸다 (실패하면 던진다)
 // onStart(key) / onStop(): 운동 세션 시작·종료 요청 (실패하면 던진다). onReport(id): 내가 종료한 세션의 리포트로 이동
-export function createAnalysisPanel(messages = {}, { exercises = [], onSelect = null, onStart = null, onStop = null, onReport = null } = {}) {
+export function createAnalysisPanel(messages = {}, { exercises = [], onSelect = null, onStart = null, onStop = null, onSkipRest = null, onReport = null } = {}) {
   const picker = h("div", { class: "seg ap-picker", role: "group", "aria-label": "운동 선택" });
   const pickerNote = h("p", { class: "ap-picker-note muted", role: "status", "aria-live": "polite", hidden: true });
   const calibrated = h("span", { class: "ap-note muted", hidden: true }, "초기값 기준 · 참고용");
@@ -39,18 +40,40 @@ export function createAnalysisPanel(messages = {}, { exercises = [], onSelect = 
     h("strong", {}, "분석기 신호가 없어요"),
     h("span", { class: "muted" }, "PC에서 ./run_mqtt.sh 로 분석기를 켜면 여기에 실시간으로 나타나요"));
 
+  const title = h("h2", {}, "운동");
   const stateLabel = h("span", { class: "ap-state", "data-state": "idle" }, h("i", { "aria-hidden": "true" }), h("b", {}, "확인 중"));
   const mainButton = h("button", { type: "button", class: "ap-main", "data-mode": "start", disabled: true }, "운동 시작");
   const finishedText = h("span", {});
   const finishedLink = h("button", { type: "button", class: "ghost ap-finished-link" }, "리포트 보기");
   const finished = h("div", { class: "ap-finished", role: "status", hidden: true }, h("i", { "aria-hidden": "true" }), finishedText, finishedLink);
 
+  // 세트 진행: 몇 번째 세트인지, 이번 세트에서 몇 회 했는지
+  const setsTitle = h("b", {}, "");
+  const setsDots = h("span", { class: "ap-dots", "aria-hidden": "true" });
+  const setsReps = h("span", { class: "ap-sets-reps" }, "");
+  const setsFill = h("i");
+  const sets = h("div", { class: "ap-sets", hidden: true },
+    h("div", { class: "ap-sets-head" }, setsTitle, setsDots, setsReps),
+    h("div", { class: "ap-sets-bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100" }, setsFill));
+  // 준비·휴식: 카운트다운. 이 동안에는 횟수를 세지 않는다
+  const restHead = h("p", { class: "ap-rest-head" }, "");
+  const restTime = h("strong", { class: "ap-rest-time", "aria-live": "off" }, "");
+  const restNext = h("p", { class: "ap-rest-next muted" }, "");
+  const restSkip = h("button", { type: "button", class: "ghost ap-rest-skip" }, "건너뛰기");
+  const rest = h("div", { class: "ap-rest", role: "status", hidden: true }, restHead, restTime, restNext, restSkip);
+  restSkip.addEventListener("click", async () => {
+    restSkip.disabled = true;
+    try { await onSkipRest?.(); } catch (e) { setNote(sessionErrorText(e)); } finally { restSkip.disabled = false; }
+  });
+
   const el = h("div", { class: "card ap", "data-state": "empty" },
     offline,
-    h("div", { class: "ap-head" }, h("h2", {}, "운동"), h("div", { class: "ap-head-meta" }, stateLabel, calibrated)),
+    h("div", { class: "ap-head" }, title, h("div", { class: "ap-head-meta" }, stateLabel, calibrated)),
     h("div", { class: "ap-session" }, picker, mainButton),
     pickerNote,
     finished,
+    sets,
+    rest,
     h("div", { class: "ap-summary" },
       h("div", { class: "ap-cell ap-cell-reps" }, h("span", { class: "ap-cell-label" }, "횟수"), h("div", { class: "ap-reps" }, repsNum, h("span", { class: "ap-reps-unit" }, "회"))),
       h("div", { class: "ap-cell" }, h("span", { class: "ap-cell-label" }, "자세 단계"), phase),
@@ -74,6 +97,7 @@ export function createAnalysisPanel(messages = {}, { exercises = [], onSelect = 
   let stopRequested = false; // 내가 종료를 눌렀다 -> 리포트가 나오면 바로 이동
   let seenLastId; // 이미 본 마지막 세션 id (처음 받은 값은 새로 끝난 게 아니다)
   let lastSeenInitialized = false;
+  let wasActive = false; // 이 화면에서 운동 중인 걸 본 적이 있다
   let lastSession = null;
   let pending = null; // 바꿔 달라고 요청했지만 아직 analyzer가 따라오지 않은 운동
   let pendingTimer = null;
@@ -133,8 +157,8 @@ export function createAnalysisPanel(messages = {}, { exercises = [], onSelect = 
 
   function renderMain() {
     const supported = sessionState !== "legacy";
-    mainButton.hidden = !supported;
     const active = sessionState === "active";
+    mainButton.hidden = !supported || (!active && !onStart); // 운동 탭은 카드에서 시작하므로 패널에는 종료만 있다
     mainButton.dataset.mode = active ? "stop" : "start";
     mainButton.textContent = sessionPending === "start" ? "시작하는 중…" : sessionPending === "stop" ? "저장하는 중…" : active ? "운동 종료" : "운동 시작";
     mainButton.disabled = !online || sessionPending != null || pending != null;
@@ -231,6 +255,24 @@ export function createAnalysisPanel(messages = {}, { exercises = [], onSelect = 
 
     stateLabel.dataset.state = !v.online ? "off" : v.session.active ? "active" : "idle";
     stateLabel.lastChild.textContent = !v.online ? "분석기 꺼짐" : sessionPending === "stop" ? "저장 중" : v.session.active ? (v.session.supported ? "운동 중" : "분석 중") : "준비 중";
+    el.dataset.status = v.progress?.status ?? "free";
+    title.textContent = v.exercise ? exerciseLabel(v.exercise) : "운동";
+    const pv = v.session.active ? progressView(v.progress) : null;
+    sets.hidden = !pv;
+    rest.hidden = !pv || !pv.headline;
+    if (pv) {
+      setsTitle.textContent = pv.title;
+      setsReps.textContent = pv.repsText;
+      setsFill.style.width = `${pv.repsPct}%`;
+      sets.querySelector(".ap-sets-bar").setAttribute("aria-valuenow", String(pv.repsPct));
+      setsDots.replaceChildren(...pv.dots.map((d) => h("i", { "data-state": d.state, title: `${d.index}세트` })));
+      if (pv.headline) {
+        restHead.textContent = pv.headline;
+        restTime.textContent = pv.countdown ?? "";
+        restNext.textContent = pv.next ?? "";
+        restSkip.hidden = !pv.skippable || !onSkipRest;
+      }
+    }
     // 방금 끝난 세션: 내가 종료를 눌렀다면 리포트로 바로 가고, 아니면 배너로 알려 준다
     const done = v.session.last;
     if (!lastSeenInitialized) { lastSeenInitialized = true; seenLastId = done?.id ?? null; }
@@ -240,8 +282,10 @@ export function createAnalysisPanel(messages = {}, { exercises = [], onSelect = 
       finishedText.textContent = done.saved ? `방금 끝난 운동 · ${done.text}` : `${done.text} · 기록을 저장하지 못했어요`;
       finishedLink.hidden = !done.saved;
     }
-    if (stopRequested && v.idle && done) {
-      stopRequested = false;
+    if (v.session.active) wasActive = true;
+    // 내가 종료를 눌렀거나, 운동 중이던 세션이 목표를 다 채워 저절로 끝났다 -> 리포트로
+    if ((stopRequested || wasActive) && v.idle && done) {
+      stopRequested = wasActive = false;
       if (done.saved && done.id !== seenLastId) onReport?.(done.id);
     }
     if (done) seenLastId = done.id;

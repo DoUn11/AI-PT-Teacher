@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from aipt_analyzer import Analyzer, load_exercise_config
-from aipt_analyzer.control import Command
+from aipt_analyzer.control import Command, Plan, parse_plan
 from aipt_analyzer.results import RepResult, RepSummary
 from aipt_analyzer.severity import rep_parts
 from aipt_analyzer.station import Station
@@ -180,17 +180,18 @@ def test_station_stop_flushes_reps_finishes_and_reports_the_session():
     assert station.state == "idle" and idle.worker is None and idle.analyzer.counter.reps == 0  # 새 분석기
     assert backend.bodies("/reps")[0]["reps"][0]["parts"]["torso"] > 0
     assert any(r.url.path.endswith("/sessions/1/finish") for r in backend.requests)
-    assert station.last == {"id": 1, "exercise": "squat", "total_reps": 1, "avg_score": 80.0, "saved": True}
+    assert station.last == {"id": 1, "exercise": "squat", "total_reps": 1, "avg_score": 80.0, "saved": True,
+                            "target_sets": None, "completed_sets": None}
     assert info.calls[-1] == ("session", "idle", None, station.last)
 
 
-def test_station_switching_exercise_while_active_closes_and_reopens():
+def test_station_ignores_select_and_start_while_a_session_is_running():
     station, backend, info = make_station()
-    station.handle(Command("start"))
-    parts = station.handle(Command("select", "kneeup"))
-    assert station.state == "active" and station.cfg.exercise == "kneeup" and station.session_id == 2
-    assert any(r.url.path.endswith("/sessions/1/finish") for r in backend.requests)
-    assert parts.analyzer.cfg.exercise == "kneeup"
+    parts = station.handle(Command("start"))
+    assert station.handle(Command("select", "kneeup")) is None
+    assert station.handle(Command("start", "kneeup")) is None  # 운동을 바꾸려면 먼저 종료
+    assert station.cfg.exercise == "squat" and station.session_id == 1 and station.parts is parts
+    assert not any(r.url.path.endswith("/finish") for r in backend.requests)
 
 
 def test_station_select_while_idle_just_swaps_the_exercise():
@@ -203,9 +204,9 @@ def test_station_select_while_idle_just_swaps_the_exercise():
 
 def test_station_start_with_another_exercise_and_unknown_exercise():
     station, backend, info = make_station()
+    assert station.handle(Command("start", "nope")) is None and station.state == "idle"
     station.handle(Command("start", "sidecrunch"))
     assert station.state == "active" and station.cfg.exercise == "sidecrunch"
-    assert station.handle(Command("select", "nope")) is None and station.cfg.exercise == "sidecrunch"
 
 
 def test_station_survives_a_backend_that_is_down():
@@ -243,7 +244,155 @@ def test_publisher_hides_counts_while_idle_and_reports_the_session():
         pub.set_session("active", 5, datetime(2026, 1, 1, tzinfo=timezone.utc), None)
         p = pub.payload(next(r for r in results if r.rep), now=11.0)  # 반복이 끝난 프레임
         assert p["reps"] == 1 and p["last_rep"]["index"] == 1
-        assert p["session"] == {"state": "active", "id": 5, "started_at": "2026-01-01T00:00:00+00:00", "last": None}
+        assert p["session"] == {"state": "active", "id": 5, "started_at": "2026-01-01T00:00:00+00:00", "last": None, "progress": None}
         json.dumps(p)
+    finally:
+        pub.close()
+
+
+# ---- 목표(세트·횟수)가 있는 세션 ----------------------------------------------
+
+
+class Clock:
+    def __init__(self):
+        self.t = 100.0
+
+    def __call__(self):
+        return self.t
+
+
+def planned_station(**kw):
+    backend, info, clock = Backend(), Info(), Clock()
+    station = Station(load_exercise_config("squat"), client=make_client(backend), info=info, autostart=False, clock=clock, **kw)
+    return station, backend, info, clock
+
+
+def do_reps(station, n, lean=20):
+    """현재 부품으로 n번 반복하는 영상을 파이프라인처럼 흘려 보낸다 (반복마다 업로드, 부품 전환을 따른다)."""
+    parts = station.parts
+    for pose in [squat_pose(k, lean=lean) for _ in range(n) for k in cycle(172, 90)]:
+        res = parts.analyzer.process(pose, station._clock())
+        if res.rep and parts.worker:
+            parts.worker.submit(res.rep)
+        parts = station.step(None) or parts
+        station._clock.t += 1 / 30
+    return parts
+
+
+def test_parse_plan_validates_ranges():
+    assert parse_plan(None) is None
+    assert parse_plan({"sets": 3, "reps": 10}) == Plan(3, 10, 60)
+    assert parse_plan({"sets": "2", "reps": 8, "rest_seconds": 0}) == Plan(2, 8, 0)
+    for bad in ({"sets": 0, "reps": 5}, {"sets": 3, "reps": 101}, {"sets": 3, "reps": 5, "rest_seconds": 601}, {"sets": 3}, "x", [1, 2]):
+        with pytest.raises(ValueError):
+            parse_plan(bad)
+
+
+def test_control_accepts_plans_and_skip_rest_and_drops_bad_plans():
+    pytest.importorskip("paho.mqtt.client")
+    from aipt_analyzer.control import ExerciseControl
+
+    ctl = ExerciseControl("mqtt://127.0.0.1:1/x/control")
+    msg = lambda b: SimpleNamespace(payload=b, retain=False)
+    try:
+        ctl._on_message(None, None, msg(b'{"action":"start","exercise":"pushup","plan":{"sets":3,"reps":10,"rest_seconds":45}}'))
+        assert ctl.take() == Command("start", "pushup", Plan(3, 10, 45))
+        ctl._on_message(None, None, msg(b'{"action":"skip_rest"}'))
+        assert ctl.take() == Command("skip_rest")
+        ctl._on_message(None, None, msg(b'{"action":"start","exercise":"pushup","plan":{"sets":99,"reps":10}}'))
+        assert ctl.take() is None  # 범위를 벗어난 목표는 통째로 무시
+    finally:
+        ctl.close()
+
+
+def test_planned_session_flows_ready_set_rest_set_and_finishes_by_itself():
+    station, backend, info, clock = planned_station()
+    station.handle(Command("start", "squat", Plan(2, 2, 10)))
+    start_body = backend.bodies("/workouts/sessions")[0]
+    assert (start_body["target_sets"], start_body["target_reps"], start_body["rest_seconds"]) == (2, 2, 10)
+
+    p = station.progress()
+    assert p["status"] == "ready" and p["set_index"] == 1 and p["reps_done"] == 0 and p["remaining"] == 5.0
+    station.step(None)
+    assert station.status == "ready"  # 아직 자세 잡는 시간
+    clock.t += 5.1
+    parts = station.step(None)
+    assert station.status == "working" and parts.worker is not None
+
+    do_reps(station, 1)
+    assert station.progress()["set_reps"] == 1 and station.status == "working"
+    parts = do_reps(station, 1)  # 1세트 끝 -> 휴식
+    assert station.status == "resting" and station.set_index == 1
+    p = station.progress()
+    assert p["reps_done"] == 2 and p["set_reps"] == 2 and p["remaining"] == pytest.approx(10, abs=1)
+    assert parts.worker is None  # 휴식 중에는 올리지 않는다
+
+    do_reps(station, 1)  # 휴식 중에 움직여도 세지 않는다
+    assert station.progress()["reps_done"] == 2
+    clock.t += 11
+    station.step(None)
+    assert station.status == "working" and station.set_index == 2
+    assert station.progress()["set_reps"] == 0 and station.progress()["reps_done"] == 2
+
+    do_reps(station, 2)  # 마지막 세트 끝 -> 저절로 종료
+    assert station.state == "idle" and station.progress() is None
+    assert station.last["total_reps"] == 1 and station.last["target_sets"] == 2 and station.last["completed_sets"] == 2
+    uploaded = [r["index"] for body in backend.bodies("/reps") for r in body["reps"]]
+    assert uploaded == [1, 2, 3, 4]  # 휴식 중 움직임은 빠지고 번호는 세션 안에서 이어진다
+    assert any(r.url.path.endswith("/finish") for r in backend.requests)
+
+
+def test_skip_rest_and_zero_rest_and_stopping_early():
+    station, backend, info, clock = planned_station()
+    station.handle(Command("start", "squat", Plan(3, 1, 30)))
+    station.handle(Command("skip_rest"))  # 준비 시간도 건너뛴다
+    station.step(None)
+    assert station.status == "working"
+    do_reps(station, 1)
+    assert station.status == "resting"
+    station.step(Command("skip_rest"))
+    assert station.status == "working" and station.set_index == 2
+
+    do_reps(station, 1)
+    station.step(Command("stop"))  # 목표를 다 채우지 않고 끝낸다
+    assert station.state == "idle" and station.last["completed_sets"] == 2 and station.last["target_sets"] == 3
+
+    station.handle(Command("start", "squat", Plan(2, 1, 0)))  # 휴식 0이면 바로 다음 세트
+    station.handle(Command("skip_rest")); station.step(None)
+    do_reps(station, 1)
+    assert station.status == "working" and station.set_index == 2
+
+
+def test_free_session_without_plan_has_no_progress_and_never_auto_finishes():
+    station, backend, info, clock = planned_station()
+    station.handle(Command("start", "squat"))
+    assert station.progress() is None and station.status == "working"
+    do_reps(station, 3)
+    assert station.state == "active"
+    assert "target_sets" not in backend.bodies("/workouts/sessions")[0]
+
+
+def test_publisher_shows_set_progress_and_does_not_count_while_resting():
+    pytest.importorskip("paho.mqtt.client")
+    from aipt_analyzer.publisher import AnalysisPublisher
+
+    station, backend, _, clock = planned_station()
+    cfg = load_exercise_config("squat")
+    pub = AnalysisPublisher("mqtt://127.0.0.1:1/x/analysis", cfg, rate_hz=1000)
+    station._info = pub
+    pub.progress_source = station.progress
+    try:
+        pub.set_session("active", 1, None, None)
+        station.handle(Command("start", "squat", Plan(2, 1, 10)))
+        station._info = None
+        results = run(Analyzer(cfg), [squat_pose(k, lean=20) for k in cycle(172, 90)])
+        rep_result = next(r for r in results if r.rep)
+        ready = pub.payload(rep_result, now=1.0)  # 준비 중: 반복을 세지 않는다
+        assert ready["reps"] == 0 and ready["last_rep"] is None
+        assert ready["session"]["progress"]["status"] == "ready" and ready["session"]["progress"]["sets"] == 1 + 1
+        clock.t += 6; station.step(None)
+        working = pub.payload(rep_result, now=2.0)
+        assert working["reps"] == 1 and working["last_rep"]["index"] == 1
+        json.dumps(working)
     finally:
         pub.close()

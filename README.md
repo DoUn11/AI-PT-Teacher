@@ -3,8 +3,7 @@
 CLOUD AIOT TEAM 4 — 카메라로 운동 자세를 분석하고, 반복(rep)별 점수와 피드백을 기록하는 AI 퍼스널 트레이너.
 
 ```
-Pi 카메라 ─H.264─> 로컬 PC (YOLO pose 분석 + 영상 오버레이) ─REST─> 백엔드(FastAPI + DB) <─ 웹 (기록 조회)
-웹캠 ──────────> 웹 프런트엔드 (MediaPipe 분석) ─REST─────────────┘
+Pi 카메라 ─MQTT─> 로컬 PC (YOLO pose 분석 + 관절선 오버레이) ─REST/MQTT─> 백엔드(FastAPI + DB) <─ 웹 (운동 카드 · 실시간 · 리포트)
 ```
 
 지원 종목: 스쿼트, 푸시업 (런지·플랭크·크런치는 추가 예정)
@@ -14,7 +13,7 @@ Pi 카메라 ─H.264─> 로컬 PC (YOLO pose 분석 + 영상 오버레이) ─
 | 폴더 | 역할 | 문서 |
 |---|---|---|
 | [backend/](backend/) | FastAPI 서버. 회원가입·로그인(JWT), 운동 세션·rep 저장, 통계 | [README](backend/README.md) |
-| [frontend/](frontend/) | 웹 화면. 웹캠 자세 분석, 기록 대시보드 (빌드 도구 없음) | [README](frontend/README.md) |
+| [frontend/](frontend/) | 웹 화면. 홈, 운동 카드와 세트 진행, 세션 리포트, 기록 (빌드 도구 없음) | [README](frontend/README.md) |
 | [analyzer/](analyzer/) | 로컬 분석기. Pi 영상을 YOLO로 분석하고 결과를 백엔드로 업로드 | [README](analyzer/README.md) |
 | [raspberry/](raspberry/) | Pi 카메라 영상 송출 설정과 성능 측정 | [README](raspberry/README.md) |
 
@@ -22,7 +21,6 @@ Pi 카메라 ─H.264─> 로컬 PC (YOLO pose 분석 + 영상 오버레이) ─
 
 - Python 3.11 이상 (권장 3.12), [uv](https://docs.astral.sh/uv/)
 - 프런트엔드 서버용 Python 3 (Node.js 20 이상은 `npm start`/테스트를 쓸 때만)
-- 웹캠 분석은 Chrome 등 최신 브라우저 + 인터넷 연결 (MediaPipe를 CDN에서 불러옴)
 
 ## 서버 켜는 절차 (웹 + 백엔드)
 

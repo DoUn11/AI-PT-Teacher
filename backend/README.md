@@ -66,7 +66,7 @@ analyzer 쪽 발행은 `./run_mqtt.sh`가 켠다. 이 JSON의 `checks`는 새 �
 | POST | `/auth/register` | 회원가입 `{email, password(8자~72바이트), nickname}` |
 | POST | `/auth/login` | `{email, password}` → `{access_token, token_type}` |
 | GET | `/users/me` | 내 정보 |
-| POST | `/workouts/sessions` | 세션 시작 `{exercise: "squat" \| "pushup"}` |
+| POST | `/workouts/sessions` | 세션 시작 `{exercise, target_sets?, target_reps?, rest_seconds?}`. 목표가 있으면 종료할 때 다음 목표를 계산한다(`workouts/progression.py`) |
 | POST | `/workouts/sessions/{id}/reps` | **로컬 분석기용.** 완료된 rep 업로드 (아래) |
 | POST | `/workouts/sessions/{id}/finish` | 세션 종료, `total_reps`·`avg_score` 계산 |
 | GET | `/workouts/sessions` | 내 세션 목록 (`exercise`, `limit`≤100, `offset`) 최신순 |
@@ -74,7 +74,10 @@ analyzer 쪽 발행은 `./run_mqtt.sh`가 켠다. 이 JSON의 `checks`는 새 �
 | GET | `/workouts/stats` | 종료된 세션 기준 운동별 누적 통계 (`since` 선택) |
 | GET | `/workouts/sessions/{id}/report` | **세션 리포트:** 부위별(팔·몸통·다리) 약점·등급·지적 횟수, 다음에 신경 쓸 부위(`focus`), 자주 지적된 자세, 같은 운동의 이전 세션 대비 점수 변화 |
 | GET | `/workouts/insights` | **홈/기록용 요약:** 누적, 연속 운동일, 주간 활동, 부위별 약점과 추세, 다음 운동 추천, 최근 30세션. 날짜 경계는 `tz_offset`(UTC에서 동쪽으로 분, 한국 540) 기준 |
-| POST | `/camera/session/start` | 웹에서 운동 세션 시작 `{exercise}`. analyzer에 제어 명령을 보낸다(202). analyzer가 꺼져 있거나 이미 운동 중이면 409, MQTT가 꺼져 있으면 503 |
+| GET | `/workouts/plans` | **운동 카드용:** 운동마다 지금 목표(세트·횟수·휴식), 강도 올리는 속도(`pace`)와 자동 여부, 최근 평가(`last_change`)·제안(`suggestion`), 지난 운동 결과, 운동별 한계 |
+| PUT | `/workouts/plans/{exercise}` | 목표 저장 `{sets, reps, rest_seconds, pace: slow\|normal\|fast, auto_progress}`. 세트·횟수가 바뀌면 그때부터의 기록으로 다음 목표를 계산한다 |
+| POST | `/camera/session/skip-rest` | 휴식(또는 시작 전 준비)을 건너뛴다 (202) |
+| POST | `/camera/session/start` | 웹에서 운동 세션 시작 `{exercise, sets?, reps?, rest_seconds?}`(목표는 함께 또는 생략). analyzer에 제어 명령을 보낸다(202). analyzer가 꺼져 있거나 이미 운동 중이면 409, MQTT가 꺼져 있으면 503 |
 | POST | `/camera/session/stop` | 운동 세션 종료(202). 끝난 세션 id는 `/camera/analysis`의 `info.session.last`로 알려 준다 |
 | GET | `/camera/status` | Pi 카메라 수신 상태 `{enabled, broker_connected, online, fps, last_frame_age_seconds, frames_total}` |
 | GET | `/camera/analysis` | analyzer가 보낸 최신 분석 정보 `{online, age_seconds, info}`. `info`: 횟수·단계·주 특징 값/기준선·실시간 피드백·**자세 조건별 판정(`checks`)**·마지막 반복·점수 이력 |
@@ -97,7 +100,7 @@ POST /api/v1/workouts/sessions/1/reps
 
 - `index`는 세션 안에서 1부터. **같은 index를 다시 보내면 무시**하므로 네트워크 재시도가 안전하다.
 - `completed_at`은 생략 가능. 보낼 때는 **시간대 포함 필수**(`Z` 또는 `+09:00`). 응답의 모든 시각은 UTC.
-- `parts`는 생략 가능한 `{arms, torso, legs}`(각 0~1, 반복에서 그 부위가 얼마나 약했나). 로컬 분석기가 보낸다. 생략하면(웹캠 분석, 예전 기록) 피드백 코드가 가리키는 부위를 0.7로 칠해서 응답한다 (`body_parts.py`). 응답의 `parts`는 항상 채워져 있다.
+- `parts`는 생략 가능한 `{arms, torso, legs}`(각 0~1, 반복에서 그 부위가 얼마나 약했나). 로컬 분석기가 보낸다. 생략하면(예전 기록) 피드백 코드가 가리키는 부위를 0.7로 칠해서 응답한다 (`body_parts.py`). 응답의 `parts`는 항상 채워져 있다.
 - `feedback`은 문자열 코드 목록(최대 10개). 서버는 값을 검증하지 않는다. 현재 로컬 분석기(`../analyzer`)가 쓰는 코드는 `shallow_depth`, `trunk_lean`, `body_line`이며, 웹은 코드를 문구로 매핑해야 한다(분석기의 `configs/messages.ko.json` 참고).
 - 종료된 세션에는 rep을 추가할 수 없다(409). `finish`는 여러 번 호출해도 같은 결과를 돌려준다.
 - 다른 사용자의 세션은 존재 여부를 숨기려고 404로 응답한다.

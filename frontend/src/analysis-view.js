@@ -165,6 +165,7 @@ export function analysisView(data, messages = {}) {
     hasInfo: true,
     online: data.online,
     session,
+    progress: info.session?.progress ?? null, // 세트 진행 (화면 값은 plan-view.progressView)
     idle,
     // 준비 중에는 횟수를 세지 않으므로 시작을 누르기 전에 무엇을 하면 되는지 알려 준다
     ready: idle ? (info.visible ? { tone: "good", text: "준비됐어요 · 시작을 눌러 주세요" } : { tone: "warn", text: "카메라 앞에 서 주세요" }) : null,

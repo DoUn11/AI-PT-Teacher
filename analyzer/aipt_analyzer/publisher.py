@@ -64,7 +64,7 @@ class FramePublisher:
         self._client.loop_stop()
 
 
-INFO_VERSION = 3  # 2: checks(조건별 판정) 추가, 값은 소수 3자리 / 3: session(운동 세션 상태) 추가
+INFO_VERSION = 4  # 2: checks(조건별 판정) 추가, 값은 소수 3자리 / 3: session(운동 세션 상태) / 4: session.progress(세트 진행)
 MAX_REP_HISTORY = 12
 
 
@@ -89,6 +89,7 @@ class AnalysisPublisher:
         self._rep_stats: dict[str, dict[str, float]] = {}  # 마지막 반복의 특징별 min/max/mean (반복 후 판정 조건용)
         self._scores: list[int] = []
         self._session = {"state": "active", "id": None, "started_at": None, "last": None}
+        self.progress_source = None  # 세트 진행을 돌려주는 함수 (Station.progress). 없으면 목표 없는 운동
         self.sent = 0
         self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         if os.environ.get("MQTT_USERNAME"):
@@ -124,7 +125,9 @@ class AnalysisPublisher:
     def payload(self, result: FrameResult, now: float | None = None) -> dict:
         now = time.monotonic() if now is None else now
         cfg = self._cfg
-        idle = self._session["state"] == "idle"  # 준비 중에는 자세만 보여 주고 횟수는 세지 않는다
+        progress = self.progress_source() if self.progress_source else None
+        # 준비·휴식 중에는 자세만 보여 주고 횟수는 세지 않는다 (세트 사이 움직임이 기록되지 않게)
+        idle = self._session["state"] == "idle" or (progress is not None and progress["status"] != "working")
         if result.rep is not None and not idle:
             r = result.rep
             self._last_rep = {
@@ -144,8 +147,8 @@ class AnalysisPublisher:
             "elapsed_seconds": round(now - self._started, 1),
             "visible": result.visible,
             "phase": result.phase,  # waiting | up | moving | down
-            "reps": 0 if idle else result.reps,
-            "session": self._session,
+            "reps": (progress["reps_done"] if progress else 0) if idle else result.reps,
+            "session": {**self._session, "progress": progress},
             "primary": {"feature": cfg.primary_feature, "value": None if value is None else round(value, 3)},
             "features": {k: round(v, 3) for k, v in result.features.items()},
             # 게이지에 표시할 기준선: 시작 자세 / 1회로 세는 지점 / 목표 깊이

@@ -2,6 +2,7 @@
 import { createBodyMap } from "./body-map.js?v=20261129.1";
 import { h } from "./dom.js?v=20261129.1";
 import { reportView } from "./insights-view.js?v=20261129.1";
+import { changeView, planResultView } from "./plan-view.js?v=20261129.1";
 
 const fmtDate = (iso) => new Date(iso).toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" });
 
@@ -26,8 +27,8 @@ export function partRow(p, { hot = false } = {}) {
   return row;
 }
 
-// report: GET /workouts/sessions/{id}/report. ctx: { messages, onAgain(exercise), onBack() }
-export function renderReport(report, { messages = {}, onAgain = null, onBack = null } = {}) {
+// report: GET /workouts/sessions/{id}/report. ctx: { messages, onAgain(exercise), onBack(), onApplyPlan(change) }
+export function renderReport(report, { messages = {}, onAgain = null, onBack = null, onApplyPlan = null } = {}) {
   const v = reportView(report, messages);
   const root = h("div", { class: "report" });
 
@@ -50,6 +51,17 @@ export function renderReport(report, { messages = {}, onAgain = null, onBack = n
   if (v.empty) {
     root.append(h("section", { class: "card" }, h("p", { class: "muted" }, "이 세션에는 완료된 반복이 없어서 분석할 내용이 없어요. 몸 전체가 카메라에 보이게 서서 다시 시도해 보세요."), onAgain && h("button", { type: "button", onClick: () => onAgain(v.exerciseKey) }, "다시 하기")));
     return root;
+  }
+
+  const result = planResultView(report.plan);
+  if (result) {
+    root.append(h("section", { class: "card rp-plan", "data-complete": String(result.complete) },
+      h("div", { class: "rp-plan-head" }, h("h3", {}, "목표 결과"), h("span", { class: "muted" }, result.target)),
+      h("div", { class: "rp-plan-main" },
+        h("strong", {}, result.title),
+        h("div", { class: "plan-bar", role: "progressbar", "aria-valuenow": String(result.pct), "aria-valuemin": "0", "aria-valuemax": "100" }, h("i", { style: `width:${result.pct}%` }))),
+      h("ul", { class: "set-list" }, result.perSet.map((s) =>
+        h("li", { "data-tone": s.tier, "data-partial": String(s.partial) }, h("b", {}, `${s.set}세트`), h("span", {}, s.text), h("em", {}, s.score == null ? "—" : `${s.score}점`))))));
   }
 
   const rows = new Map();
@@ -76,7 +88,7 @@ export function renderReport(report, { messages = {}, onAgain = null, onBack = n
 
   root.append(v.focus
     ? h("section", { class: "card rp-focus", "data-part": v.focus.part },
-        h("p", { class: "eyebrow" }, "다음 운동 포인트"),
+        h("p", { class: "eyebrow" }, "다음에 고칠 점"),
         h("h3", {}, v.focus.title),
         v.focus.tip && h("p", { class: "rp-tip" }, v.focus.tip),
         onAgain && h("button", { type: "button", onClick: () => onAgain(v.exerciseKey) }, "이 운동 다시 하기"))
@@ -93,6 +105,22 @@ export function renderReport(report, { messages = {}, onAgain = null, onBack = n
           h("div", { class: "issue-head" }, h("span", {}, i.text), h("b", {}, `${i.count}회`)),
           h("div", { class: "issue-bar", "aria-hidden": "true" }, h("span", { style: `width:${Math.max(4, i.pct)}%` })),
           h("p", { class: "muted" }, `전체의 ${i.pct}% · ${i.parts.join("·") || "부위 정보 없음"}`))))));
+  }
+
+  const next = changeView(report.next_plan);
+  if (next) {
+    const apply = next.suggestOnly && onApplyPlan
+      ? h("button", { type: "button", onClick: async (e) => {
+          const b = e.currentTarget;
+          b.disabled = true;
+          try { await onApplyPlan(next); b.textContent = "적용했어요"; } catch (err) { b.disabled = false; b.textContent = err.message || "적용하지 못했어요"; }
+        } }, `${next.target}로 적용`)
+      : null;
+    root.append(h("section", { class: "card rp-next", "data-tone": next.tone },
+      h("p", { class: "eyebrow" }, "다음 운동 목표"),
+      h("h3", {}, next.target ?? "지금 목표 유지"),
+      h("p", {}, next.text),
+      apply));
   }
 
   root.append(h("section", { class: "card rp-timeline" },

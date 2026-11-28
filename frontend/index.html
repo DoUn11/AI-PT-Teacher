@@ -15,7 +15,6 @@
       <nav id="main-nav" aria-label="운동 메뉴">
         <a id="btn-home" href="?tab=home">홈</a>
         <a id="btn-pi" href="?tab=pi">운동</a>
-        <a id="btn-camera" href="?tab=camera">웹캠</a>
         <a id="btn-dashboard" href="?tab=dashboard">기록</a>
       </nav>
     <div class="header-actions"><span id="who" class="muted"></span><button id="logout" class="ghost" type="button" hidden>로그아웃</button>
@@ -42,31 +41,6 @@
     <div id="app" hidden>
 
       <section id="tab-home" aria-label="홈"></section>
-      <section id="tab-camera" hidden aria-label="웹캠 자세 분석">
-        <div class="workout-layout">
-          <div class="camera-panel card">
-
-            <div class="stage"><span id="camera-state" class="badge" role="status" aria-label="정지"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path class="state-paused" d="M6 5h4v14H6zM14 5h4v14h-4z"/><path class="state-running" d="m3 5 9 7-9 7zm10 0 9 7-9 7z"/></svg></span>
-              <div id="camera-placeholder"><svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10 5-3v10l-5-3"/></svg></div>
-              <video id="video" playsinline muted></video><canvas id="overlay"></canvas>
-            </div>
-            <div class="camera-toolbar"><p id="status" class="muted" aria-live="polite">정지</p><div class="action-pair" role="group" aria-label="촬영 제어"><button id="start" type="button" aria-label="촬영 시작"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M7 4.8a1 1 0 0 1 1.5-.86l11 7a1.25 1.25 0 0 1 0 2.12l-11 7A1 1 0 0 1 7 19.2Z"/></svg><span>시작</span></button><button id="stop" type="button" aria-label="촬영 종료" disabled><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg><span>종료</span></button></div></div>
-          </div>
-          <aside class="workout-side">
-            <div class="card controls">
-              <fieldset id="exercise"><legend id="exercise-label">운동</legend>
-                <div class="exercise-picker">
-                  <button id="exercise-select" class="ghost" type="button" aria-labelledby="exercise-label exercise-value" aria-haspopup="listbox" aria-controls="exercise-options" aria-expanded="false"><span id="exercise-value"></span><svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m5 7 5 5 5-5"/></svg></button>
-                  <div id="exercise-options" role="listbox" aria-labelledby="exercise-label" hidden></div>
-                </div>
-              </fieldset>
-              <label class="inline"><input id="upload" type="checkbox" checked> 결과 저장</label>
-
-            </div>
-            <div class="card session-panel"><h2>횟수</h2><p id="result" class="result" aria-live="polite"></p><p id="upload-status" class="muted" aria-live="polite"></p><ol id="reps" class="reps" reversed></ol><p class="empty-reps muted">0회</p></div>
-          </aside>
-        </div>
-      </section>
       <section id="tab-pi" hidden aria-label="운동"></section>
       <section id="tab-dashboard" hidden aria-label="기록"></section>
     </div>

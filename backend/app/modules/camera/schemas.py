@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.workouts.models import Exercise  # 업로드가 받아 주는 운동 목록과 같아야 한다
 
@@ -74,6 +74,21 @@ class LastSession(BaseModel):
     total_reps: int
     avg_score: float | None
     saved: bool
+    target_sets: int | None = None  # 목표가 있던 세션
+    completed_sets: int | None = None
+
+
+class SetProgress(BaseModel):
+    """목표가 있는 운동의 세트 진행. status: ready(자세 잡는 중) | working(세트 진행) | resting(휴식)"""
+
+    sets: int
+    reps: int
+    rest_seconds: int
+    set_index: int
+    set_reps: int  # 이번 세트에서 한 횟수
+    reps_done: int  # 세션 전체에서 한 횟수
+    status: Literal["ready", "working", "resting"]
+    remaining: float | None  # ready/resting일 때 남은 초
 
 
 class SessionState(BaseModel):
@@ -81,6 +96,7 @@ class SessionState(BaseModel):
     id: int | None  # 진행 중인 세션의 백엔드 id (업로드를 끈 경우 None)
     started_at: datetime | None
     last: LastSession | None
+    progress: SetProgress | None = None  # 목표 없이 운동하거나 대기 중이면 None
 
 
 class AnalysisInfo(BaseModel):
@@ -119,8 +135,20 @@ class ExerciseRequested(BaseModel):
 
 class SessionStart(BaseModel):
     exercise: Exercise
+    # 목표 (셋 다 함께 또는 모두 생략 = 목표 없이 자유롭게)
+    sets: int | None = Field(default=None, ge=1, le=10)
+    reps: int | None = Field(default=None, ge=1, le=100)
+    rest_seconds: int | None = Field(default=None, ge=0, le=600)
+
+    @model_validator(mode="after")
+    def _plan_complete(self):
+        if (self.sets is None) != (self.reps is None):
+            raise ValueError("sets and reps must be given together")
+        if self.sets is not None and self.rest_seconds is None:
+            self.rest_seconds = 60
+        return self
 
 
 class SessionRequested(BaseModel):
-    requested: Literal["start", "stop"]
+    requested: Literal["start", "stop", "skip_rest"]
     exercise: str | None = None  # 시작할 때만. 실제로 시작됐는지는 /camera/analysis의 session.state로 확인한다

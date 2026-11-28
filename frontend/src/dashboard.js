@@ -71,6 +71,11 @@ export async function loadDashboard(root, ctx) {
         messages,
         onBack: () => navigate("dashboard", { session: null }),
         onAgain: (exercise) => navigate("pi", { exercise }),
+        // 자동 조정이 꺼져 있을 때의 제안을 목표로 저장한다 (세트·횟수만 바뀌고 휴식·속도 설정은 그대로)
+        onApplyPlan: async (change) => {
+          const plan = (await api.plans()).find((p) => p.exercise === report.session.exercise);
+          await api.savePlan(plan.exercise, { sets: change.after.sets, reps: change.after.reps, rest_seconds: plan.rest_seconds, pace: plan.pace, auto_progress: plan.auto_progress });
+        },
       }));
     } catch (e) { fail(e); }
     return;

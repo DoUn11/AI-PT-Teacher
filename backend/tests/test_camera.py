@@ -389,7 +389,7 @@ def test_analysis_exposes_the_session_state_and_the_last_finished_session(client
     last = {"id": 4, "exercise": "pushup", "total_reps": 8, "avg_score": 82.5, "saved": True}
     hub.info.on_info(_info_bytes(session={**SESSION_IDLE, "last": last}))
     info = client.get(f"{API}/analysis", headers=h).json()["info"]
-    assert info["session"]["state"] == "idle" and info["session"]["last"] == last
+    assert info["session"]["state"] == "idle" and info["session"]["last"] == {**last, "target_sets": None, "completed_sets": None}
     hub.info.on_info(_info_bytes())
     assert client.get(f"{API}/analysis", headers=h).json()["info"]["session"] is None
 

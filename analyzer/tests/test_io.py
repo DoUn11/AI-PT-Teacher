@@ -290,7 +290,7 @@ def test_analysis_publisher_payload_contract():
         results = run(an, [squat_pose(k, lean=20) for k in cycle(172, 90)])
         payloads = [pub.payload(r, now=10.0) for r in results]
         last = payloads[-1]
-        assert last["v"] == 3 and last["exercise"] == "squat" and last["reps"] == 1
+        assert last["v"] == 4 and last["exercise"] == "squat" and last["reps"] == 1
         assert last["primary"]["feature"] == "knee_angle" and isinstance(last["primary"]["value"], float)
         assert last["thresholds"] == {"up": 160, "count": 130, "target": 100}
         assert last["last_rep"]["index"] == 1 and last["rep_scores"] == [last["last_rep"]["score"]]
@@ -393,7 +393,7 @@ def test_exercise_control_keeps_latest_valid_request_only():
         assert ctl.take() is None
         ctl._on_message(None, None, msg(b'{"exercise": "kneeup"}'))
         ctl._on_message(None, None, msg(b'{"exercise": "pushup"}'))
-        assert ctl.take() == ("select", "pushup")  # 가장 최근 요청
+        assert ctl.take() == ("select", "pushup", None)  # 가장 최근 요청
         assert ctl.take() is None  # 한 번 가져가면 비워진다
         for bad in (b"not json", b'{"exercise": "nope"}', b'{"x": 1}', b"[1]"):
             ctl._on_message(None, None, msg(bad))

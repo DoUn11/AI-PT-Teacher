@@ -62,10 +62,14 @@ class BackendClient:
             return r
         return r  # pragma: no cover
 
-    def start_session(self, exercise: str, cfg: ExerciseConfig | None = None) -> int:
+    def start_session(self, exercise: str, cfg: ExerciseConfig | None = None, plan=None) -> int:
+        """plan(sets, reps, rest_seconds)이 있으면 세션의 목표로 함께 기록한다 (진행도와 다음 목표 계산에 쓰인다)."""
         self.cfg = cfg
         self.last_finished = None
-        r = self._request("POST", "/workouts/sessions", json={"exercise": exercise})
+        body = {"exercise": exercise}
+        if plan is not None:
+            body.update(target_sets=plan.sets, target_reps=plan.reps, rest_seconds=plan.rest_seconds)
+        r = self._request("POST", "/workouts/sessions", json=body)
         r.raise_for_status()
         self.session_id = r.json()["id"]
         with self._lock:
