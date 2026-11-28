@@ -36,7 +36,9 @@ test("config files are valid and identical to the analyzer's copies", () => {
   }
   for (const name of ["squat", "pushup", "kneeup", "sidecrunch"]) validateConfig(load(name));
   const messages = load("messages.ko");
-  assert.ok(!("hand_position" in messages));
+  // 손 위치 검사는 뺐지만, 이미 저장된 기록을 보여 주려고 문구는 남긴다
+  assert.ok("hand_position" in messages);
+  assert.ok(!load("pushup").form_checks.some((c) => c.code === "hand_position"));
   for (const name of ["pushup", "kneeup", "sidecrunch"]) {
     const cfg = load(name);
     for (const c of cfg.form_checks) assert.ok(c.code in messages, `${name}: no message for ${c.code}`);

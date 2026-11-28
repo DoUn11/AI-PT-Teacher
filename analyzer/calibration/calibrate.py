@@ -64,6 +64,8 @@ EXERCISES = {
         "depth_from": ("ok_chest", "weak"),  # 가슴 이동(깔짝)은 depth 규칙으로 판정 (목표 각도는 데이터로)
         # 깔짝 푸시업은 약한 등급(최대 10점)보다 크게 깎는다: 1도당 2점, 최대 40점
         "depth_override": {"penalty_per_degree": 2.0, "min_score": 60},
+        # 위 고정값을 _note 끝에 붙인다 (손으로 맞춘 pushup.json과 같게)
+        "note_extra": "2026-11-28: count_threshold, depth 감점, hand_width는 데이터 없이 정한 고정값 (calibrate.py에 같이 반영).",
         # 손 위치(ok_hand, 골반-어깨-팔꿈치 각도)는 정면 웹캠에서 안 잡혀서 뺐다.
         # 손 간격(ok_elbow90 라벨 + hand_ratio)은 손을 넓게 짚어도 안 잡혀서 아래 고정 규칙(hand_out)으로 바꿨다.
         "checks": [],
@@ -148,7 +150,8 @@ def build(ex: str, spec: dict, reps: Path) -> tuple[dict, list[str]]:
 
     cfg = {"exercise": ex, "version": 2, "calibrated": True,
            "_note": ("calibrate.py가 만든 파일 (AI Hub 데이터, MediaPipe lite 1회 단위). 웹캠 실측으로는 아직 검증 안 함. "
-                     "_ba_rep = 하루씩 빼고 검증한 1회 균형정확도. 손으로 고치지 말고 calibrate.py를 고쳐 다시 만든다."),
+                     "_ba_rep = 하루씩 빼고 검증한 1회 균형정확도. 손으로 고치지 말고 calibrate.py를 고쳐 다시 만든다.")
+                    + (" " + spec["note_extra"] if spec.get("note_extra") else ""),
            **spec["base"], "smoothing": 0.6, "min_keypoint_conf": 0.3, "score_step": 10,
            "depth": depth, "form_checks": checks, "judge": {"type": "threshold"}}
     return cfg, report

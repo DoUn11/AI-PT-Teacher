@@ -65,7 +65,20 @@ def test_builtin_configs_load():
         gaze = [c for c in cfg.form_checks if c.code in ("gaze_front", "leg_tension")]
         assert all(not c.enabled for c in gaze)  # 시선, 다리 긴장은 꺼 둔다 (HANDOFF.md 결정)
     messages = json.loads((Path(__file__).parents[1] / "aipt_analyzer/configs/messages.ko.json").read_text("utf-8"))
-    assert "hand_position" not in messages
+    # 손 위치 검사는 뺐지만, 이미 저장된 기록을 보여 주려고 문구는 남긴다
+    assert "hand_position" in messages
+    assert "hand_position" not in {c.code for c in load_exercise_config("pushup").form_checks}
+
+
+def test_pushup_config_note_matches_calibrate_spec():
+    # calibrate.py로 다시 만들어도 손으로 맞춘 pushup.json과 같은 _note가 나와야 한다
+    # calibrate.py는 pandas가 필요해서 실행하지 않고 EXERCISES 값만 읽는다
+    import ast
+    tree = ast.parse((Path(__file__).parents[1] / "calibration/calibrate.py").read_text("utf-8"))
+    node = next(n for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "EXERCISES")
+    extra = ast.literal_eval(node.value)["pushup"]["note_extra"]
+    note = json.loads((Path(__file__).parents[1] / "aipt_analyzer/configs/pushup.json").read_text("utf-8"))["_note"]
+    assert note.endswith(" " + extra)
 
 
 def _cfg_dict(**overrides):
