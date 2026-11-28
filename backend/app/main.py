@@ -13,6 +13,7 @@ from app.modules.workouts.router import router as workouts_router
 async def lifespan(app: FastAPI):
     # MVP 단계: 테이블 자동 생성. 스키마가 안정되면 Alembic 마이그레이션으로 교체한다.
     db.Base.metadata.create_all(db.engine)
+    db.add_missing_uuids(db.engine)
     yield
 
 
